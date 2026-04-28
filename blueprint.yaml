@@ -1,0 +1,12 @@
+schema: blueprint/v1
+repo: cue
+
+features:
+  # Iteration 1 — Cue v0
+  - id: C-1
+    name: "Cue v0 spec — standalone daemon, CLI, YAML sidecar, hot-reload"
+    status: planned
+    iteration: 1
+    issue: 1
+    depends: []
+    description: "Foundational Cue v0: standalone daemon process with trigger evaluation, CLI for fire/list/inspect, cue.yaml sidecar config (per-flow), hot-reload on sidecar change. Publishes cue.fired events to NATS. Anchors downstream consumers (pulse:P-501 executor, metafactory-actions:MA-1 sidecar rollout)."
