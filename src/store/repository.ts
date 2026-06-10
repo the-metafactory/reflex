@@ -235,6 +235,14 @@ export class Repository {
 
   // ── guard state ──────────────────────────────────────────────────────────
 
+  /** Run Locks held longer than maxAgeMs — pulse outcomes never released them. */
+  staleLocks(now: string, maxAgeMs: number): Array<{ blueprintId: string; holder: string; since: string }> {
+    const rows = this.db.select().from(guardState).all();
+    return rows
+      .filter((r) => r.runLockHolder && r.runLockSince && Date.parse(now) - Date.parse(r.runLockSince) > maxAgeMs)
+      .map((r) => ({ blueprintId: r.blueprintId, holder: r.runLockHolder!, since: r.runLockSince! }));
+  }
+
   getGuardState(blueprintId: string) {
     return this.db.select().from(guardState).where(eq(guardState.blueprintId, blueprintId)).get() ?? null;
   }

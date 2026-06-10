@@ -178,6 +178,9 @@ export class CommandRouter {
             waitingApprovals: waiting.ok ? waiting.data.length : -1,
             bus: this.deps.bus.metrics(),
             nextTicks,
+            // Locks held >24h: pulse run outcomes never released them —
+            // operator-visible (spec edge: pulse not yet publishing).
+            staleLocks: repo.staleLocks(new Date().toISOString(), 24 * 3_600_000),
           },
         };
       }
