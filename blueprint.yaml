@@ -65,7 +65,7 @@ features:
 
   - id: R-108
     name: "Bus impulse source (subscription + matcher)"
-    status: planned
+    status: done
     iteration: 1
     depends: [R-104]
     description: "Per-blueprint NATS subject subscriptions; match = subject pattern + flat field-equals conditions on CloudEvents data. No expression language in v0. Also consumes mf.{net}.pulse.run.> outcomes for Run Lock release and Buffered Impulse re-presentation."
