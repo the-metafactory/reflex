@@ -16,6 +16,7 @@ import type {
   TransportSubscriber,
 } from "@the-metafactory/myelin";
 import { BoundedPublishQueue } from "./queue";
+import { REFLEX_STREAM_NAME } from "./stream";
 import type { ReflexConfig } from "../config/schema";
 import {
   buildActivationDecision,
@@ -87,6 +88,7 @@ export function createReflexBus(cfg: ReflexConfig, options: ReflexBusOptions = {
       credentials: cfg.nats.creds,
       requireAuth: true,
       reconnect: true,
+      streamName: REFLEX_STREAM_NAME,
     });
   }
 
