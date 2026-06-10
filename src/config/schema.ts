@@ -34,6 +34,13 @@ export const configSchema = z.object({
     .default({}),
   publish_queue_limit: z.number().int().positive().default(1000),
   sovereignty: sovereigntySchema.default({}),
+  /** Roots scanned recursively for reflex.yaml sidecars (R-102). */
+  watch_roots: z.array(z.string().min(1)).default([]),
+  /** Central activation-blueprint directory (R-102). */
+  activations_dir: z
+    .string()
+    .min(1)
+    .default(join(homedir(), ".config/reflex/activations")),
 });
 
 export interface ReflexConfig {
@@ -42,4 +49,6 @@ export interface ReflexConfig {
   nats: { url: string; creds: string };
   publishQueueLimit: number;
   sovereignty: z.infer<typeof sovereigntySchema>;
+  watchRoots: string[];
+  activationsDir: string;
 }
