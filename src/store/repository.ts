@@ -342,7 +342,8 @@ export class Repository {
       .from(idempotencyKeys)
       .where(and(eq(idempotencyKeys.blueprintId, blueprintId), eq(idempotencyKeys.key, key)))
       .get();
-    return row !== undefined && row.expiresAt > now;
+    // Numeric compare — mixed ISO millisecond forms must not flip validity.
+    return row !== undefined && Date.parse(row.expiresAt) > Date.parse(now);
   }
 
   sweepIdempotencyKeys(now: string): number {

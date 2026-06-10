@@ -50,15 +50,11 @@ export {
   type DecisionRow,
   type ImpulseSnapshot,
 } from "./store/repository";
+// Public pipeline surface: Pipeline + its I/O types. Guard internals
+// (checkGuards, key derivation, window constant) stay module-private —
+// root exports are stable API (sage R-104 finding); tests import internally.
 export { Pipeline, type PipelineOptions } from "./pipeline/evaluate";
-export {
-  deriveIdempotencyKey,
-  IDEMPOTENCY_WINDOW_MS,
-  type EvaluateResult,
-  type GuardReason,
-  type Impulse,
-} from "./pipeline/impulse";
-export { checkGuards, type GuardCheck } from "./pipeline/guards";
+export type { EvaluateResult, GuardReason, Impulse } from "./pipeline/impulse";
 export type { DryRunVerdict } from "./pipeline/verdict";
 // BoundedPublishQueue stays module-private (sage R-101 review): callers need
 // createReflexBus + metrics, not the outage-buffer implementation.

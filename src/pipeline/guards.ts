@@ -26,7 +26,13 @@ export function checkGuards(
   }
 
   const guardState = repo.getGuardState(blueprint.id);
-  if (blueprint.guards.cooldownMs !== undefined && guardState?.cooldownUntil && guardState.cooldownUntil > now) {
+  // Numeric compare, NOT lexical: '…T12:00:00Z' and '…T12:00:00.000Z' are the
+  // same instant but sort differently as strings (sage R-104 finding).
+  if (
+    blueprint.guards.cooldownMs !== undefined &&
+    guardState?.cooldownUntil &&
+    Date.parse(guardState.cooldownUntil) > Date.parse(now)
+  ) {
     return { pass: false, reason: "cooldown", detail: `cooldown until ${guardState.cooldownUntil}`, idempotencyKey };
   }
 

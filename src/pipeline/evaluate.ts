@@ -134,32 +134,37 @@ export class Pipeline {
       subject: "derived-by-bus",
       publishedAt: now,
     });
-    // 4. publish (queue-backed — never throws; outage rides R-101 queue)
-    await this.bus.publishFired({
-      target: blueprint.target,
-      payload: { ...blueprint.payload, ...impulse.payload },
-      idempotencyKey: check.idempotencyKey,
-      decisionId: decision.id,
-      correlationId,
-      actor: impulse.actor,
-      causationId,
-    });
-    await this.bus.publishDecision({
-      outcome: "fired",
-      blueprintId: blueprint.id,
-      decisionId: decision.id,
-      actor: impulse.actor,
-      correlationId,
-      causationId,
-    });
+    // 4. publish (queue-backed — never throws; outage rides R-101 queue).
+    // The two envelopes are independent — publish them concurrently.
+    await Promise.all([
+      this.bus.publishFired({
+        target: blueprint.target,
+        payload: { ...blueprint.payload, ...impulse.payload },
+        idempotencyKey: check.idempotencyKey,
+        decisionId: decision.id,
+        correlationId,
+        actor: impulse.actor,
+        causationId,
+      }),
+      this.bus.publishDecision({
+        outcome: "fired",
+        blueprintId: blueprint.id,
+        decisionId: decision.id,
+        actor: impulse.actor,
+        correlationId,
+        causationId,
+      }),
+    ]);
     return { outcome: "fired", decisionId: decision.id, correlationId };
   }
 
   /**
-   * Resolve a waiting Matched Decision (FR-10). approve → guard re-check
-   * first (read-only), then CAS; a guard violation after approval records an
-   * honest Blocked row linked to the matched decision. deny → Denied.
-   * ConflictError from the CAS propagates verbatim.
+   * Resolve a waiting Matched Decision (FR-10). approve → CAS to approved
+   * FIRST (exactly one resolver wins; the approval state machine records the
+   * operator's act), THEN the honest guards+fire path runs — a guard
+   * violation after approval records a Blocked row linked to the matched
+   * decision, so "approved but guard-blocked" is visible in the audit trail
+   * exactly as it happened. deny → Denied. ConflictError propagates verbatim.
    */
   async resolveMatched(
     decisionId: string,
