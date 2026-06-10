@@ -160,3 +160,14 @@ describe("local --impulse parse", () => {
     expect(r.stderr).toContain("invalid-input");
   });
 });
+
+describe("list filters", () => {
+  it("--kind filters server-side", async () => {
+    const r = await run(["list", "--kind", "schedule", "--json"]);
+    expect(r.exitCode).toBe(EXIT_OK);
+    const rows = JSON.parse(r.stdout) as Array<Record<string, unknown>>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe("cli-sched");
+    expect(rows[0]!.kind).toBe("schedule");
+  });
+});

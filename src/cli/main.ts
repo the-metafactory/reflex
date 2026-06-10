@@ -151,7 +151,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     .option("--timeout <ms>", "request timeout", "3000")
     .action(
       remote(
-        "waiting",
+        "matched",
         (data) => {
           const rows = data as Array<Record<string, unknown>>;
           return `Matched Decisions awaiting approval:\n${table(rows, ["decisionId", "blueprintId", "matchedAt", "expiresAt", "impulseSummary"])}`;

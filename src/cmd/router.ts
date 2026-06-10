@@ -105,19 +105,26 @@ export class CommandRouter {
         return handlers.approve(String(args.decisionId ?? ""), actor);
       case "deny":
         return handlers.deny(String(args.decisionId ?? ""), actor);
-      case "waiting":
+      case "matched":
         return handlers.listWaiting();
-      case "list":
+      case "list": {
+        const kindFilter = args.kind ? String(args.kind) : null;
+        const targetFilter = args.target ? String(args.target) : null;
         return {
           ok: true,
-          data: store.current().map((b) => ({
-            id: b.id,
-            kind: b.kind,
-            target: b.target,
-            policy: b.policy,
-            sourceFile: b.sourceFile,
-          })),
+          data: store
+            .current()
+            .filter((b) => (kindFilter ? b.kind === kindFilter : true))
+            .filter((b) => (targetFilter ? b.target === targetFilter : true))
+            .map((b) => ({
+              id: b.id,
+              kind: b.kind,
+              target: b.target,
+              policy: b.policy,
+              sourceFile: b.sourceFile,
+            })),
         };
+      }
       case "history": {
         const limit = Math.min(Number(args.limit ?? 50), 200);
         const rows = repo.historyFor({

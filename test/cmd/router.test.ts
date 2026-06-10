@@ -30,7 +30,7 @@ async function rig() {
 function request(bus: Awaited<ReturnType<typeof rig>>["bus"], payload: Record<string, unknown>) {
   return bus.request(
     { source: reflexSource(cfg), type: CMD_REQUEST_TYPE, payload, timeoutMs: 1000 },
-    cmdSubject(cfg, "waiting"),
+    cmdSubject(cfg, "matched"),
   );
 }
 
