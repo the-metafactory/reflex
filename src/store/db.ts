@@ -7,7 +7,8 @@ import * as schema from "./schema";
 
 export type ReflexDb = BunSQLiteDatabase<typeof schema>;
 
-/** Resolved at import time so bundled callers still find the SQL files. */
+/** Source-tree migrations dir. Bundled/packaged distribution is NOT
+ * supported yet — callers must run from a checkout (revisit at packaging). */
 const MIGRATIONS_DIR = join(import.meta.dir, "../../drizzle");
 
 /**

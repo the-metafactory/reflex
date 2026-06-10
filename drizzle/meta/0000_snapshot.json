@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9f8c7c42-2ac1-4c23-bf6b-70a0af54bb97",
+  "id": "38fa21f3-bce7-49f5-a568-8c890b1b83e2",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "approvals": {
@@ -240,6 +240,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "buffered_by_decision_id": {
+          "name": "buffered_by_decision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -254,7 +261,7 @@
         "key": {
           "name": "key",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
@@ -283,7 +290,15 @@
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "idempotency_keys_blueprint_id_key_pk": {
+          "columns": [
+            "blueprint_id",
+            "key"
+          ],
+          "name": "idempotency_keys_blueprint_id_key_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

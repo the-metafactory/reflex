@@ -54,16 +54,20 @@ export const guardState = sqliteTable("guard_state", {
   runLockSince: text("run_lock_since"),
   /** JSON Impulse — at most one per blueprint by PK construction (depth 1). */
   bufferedImpulse: text("buffered_impulse"),
+  /** The Blocked Decision that buffered it — re-presentation links to it (CONTEXT.md). */
+  bufferedByDecisionId: text("buffered_by_decision_id"),
 });
 
 export const idempotencyKeys = sqliteTable(
   "idempotency_keys",
   {
-    key: text("key").primaryKey(),
+    key: text("key").notNull(),
+    /** Keys are scoped per blueprint — a key for one blueprint must never
+     * suppress another blueprint's work (sage R-103 security finding). */
     blueprintId: text("blueprint_id").notNull(),
     expiresAt: text("expires_at").notNull(),
   },
-  (t) => [index("idempotency_expiry_idx").on(t.expiresAt)],
+  (t) => [primaryKey({ columns: [t.blueprintId, t.key] }), index("idempotency_expiry_idx").on(t.expiresAt)],
 );
 
 export const firedEvents = sqliteTable(

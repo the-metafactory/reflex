@@ -102,23 +102,26 @@ describe("guard state", () => {
     close();
   });
 
-  it("buffered impulse depth-1: second put replaces; take clears atomically", () => {
+  it("buffered impulse depth-1: second put replaces; take clears atomically and carries the blocked link", () => {
     const { r, close } = repo();
-    r.putBufferedImpulse("bp", { ...IMPULSE, payload: { n: 1 } });
-    r.putBufferedImpulse("bp", { ...IMPULSE, payload: { n: 2 } });
+    r.putBufferedImpulse("bp", { ...IMPULSE, payload: { n: 1 } }, "blocked-1");
+    r.putBufferedImpulse("bp", { ...IMPULSE, payload: { n: 2 } }, "blocked-2");
     const taken = r.takeBufferedImpulse("bp");
-    expect(taken?.payload).toEqual({ n: 2 });
+    expect(taken?.impulse.payload).toEqual({ n: 2 });
+    expect(taken?.bufferedByDecisionId).toBe("blocked-2");
     expect(r.takeBufferedImpulse("bp")).toBeNull();
     close();
   });
 
-  it("idempotency keys: has until swept past TTL", () => {
+  it("idempotency keys: blueprint-scoped, TTL at read, boundary swept", () => {
     const { r, close } = repo();
-    r.putIdempotencyKey("k1", "bp", "2026-06-10T10:10:00Z");
-    expect(r.hasIdempotencyKey("k1", "2026-06-10T10:05:00Z")).toBe(true);
-    expect(r.hasIdempotencyKey("k1", "2026-06-10T10:15:00Z")).toBe(false); // TTL enforced at read, pre-sweep
-    r.sweepIdempotencyKeys("2026-06-10T10:20:00Z");
-    expect(r.hasIdempotencyKey("k1", "2026-06-10T10:05:00Z")).toBe(false);
+    r.putIdempotencyKey("bp", "k1", "2026-06-10T10:10:00Z");
+    expect(r.hasIdempotencyKey("bp", "k1", "2026-06-10T10:05:00Z")).toBe(true);
+    expect(r.hasIdempotencyKey("OTHER", "k1", "2026-06-10T10:05:00Z")).toBe(false); // scope
+    expect(r.hasIdempotencyKey("bp", "k1", "2026-06-10T10:10:00Z")).toBe(false); // boundary: not valid AT expiry
+    expect(r.hasIdempotencyKey("bp", "k1", "2026-06-10T10:15:00Z")).toBe(false); // TTL at read, pre-sweep
+    expect(r.sweepIdempotencyKeys("2026-06-10T10:10:00Z")).toBe(1); // lte: boundary row swept, no immortals
+    expect(r.hasIdempotencyKey("bp", "k1", "2026-06-10T10:05:00Z")).toBe(false);
     close();
   });
 });
@@ -152,14 +155,14 @@ describe("restart durability", () => {
       const m = r.recordDecision({ blueprintId: "bp", outcome: "matched", impulse: IMPULSE });
       r.createApproval(m.id, "2026-06-10T23:00:00Z");
       r.setCooldown("bp", "2026-06-10T16:00:00Z");
-      r.putBufferedImpulse("bp", IMPULSE);
+      r.putBufferedImpulse("bp", IMPULSE, "blocked-x");
       close();
     }
     const { db, close } = openDb(path);
     const r = new Repository(db);
     expect(r.listWaiting()).toHaveLength(1);
     expect(r.getGuardState("bp")?.cooldownUntil).toBe("2026-06-10T16:00:00Z");
-    expect(r.takeBufferedImpulse("bp")).toEqual(IMPULSE);
+    expect(r.takeBufferedImpulse("bp")).toEqual({ impulse: IMPULSE, bufferedByDecisionId: "blocked-x" });
     close();
   });
 });

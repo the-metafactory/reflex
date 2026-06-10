@@ -1,4 +1,4 @@
-import { and, desc, eq, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, lte, sql } from "drizzle-orm";
 import type { ReflexActor } from "../bus/envelopes";
 import type { ReflexDb } from "./db";
 import { approvals, decisions, firedEvents, guardState, idempotencyKeys, ignoredCounters } from "./schema";
@@ -259,43 +259,62 @@ export class Repository {
     return released > 0;
   }
 
-  putBufferedImpulse(blueprintId: string, impulse: ImpulseSnapshot): void {
+  putBufferedImpulse(blueprintId: string, impulse: ImpulseSnapshot, bufferedByDecisionId: string): void {
     // Depth 1 by PK construction: newest replaces older (grill decision 18).
+    // The buffering Blocked Decision id rides along — re-presentation links
+    // the fresh decision to it (CONTEXT.md relationship).
+    const json = JSON.stringify(impulse);
     this.db
       .insert(guardState)
-      .values({ blueprintId, bufferedImpulse: JSON.stringify(impulse) })
-      .onConflictDoUpdate({ target: guardState.blueprintId, set: { bufferedImpulse: JSON.stringify(impulse) } })
+      .values({ blueprintId, bufferedImpulse: json, bufferedByDecisionId })
+      .onConflictDoUpdate({
+        target: guardState.blueprintId,
+        set: { bufferedImpulse: json, bufferedByDecisionId },
+      })
       .run();
   }
 
-  takeBufferedImpulse(blueprintId: string): ImpulseSnapshot | null {
+  takeBufferedImpulse(blueprintId: string): { impulse: ImpulseSnapshot; bufferedByDecisionId: string | null } | null {
     return this.db.transaction((tx) => {
       const row = tx.select().from(guardState).where(eq(guardState.blueprintId, blueprintId)).get();
       if (!row?.bufferedImpulse) return null;
-      tx.update(guardState).set({ bufferedImpulse: null }).where(eq(guardState.blueprintId, blueprintId)).run();
-      return JSON.parse(row.bufferedImpulse) as ImpulseSnapshot;
+      tx.update(guardState)
+        .set({ bufferedImpulse: null, bufferedByDecisionId: null })
+        .where(eq(guardState.blueprintId, blueprintId))
+        .run();
+      return {
+        impulse: JSON.parse(row.bufferedImpulse) as ImpulseSnapshot,
+        bufferedByDecisionId: row.bufferedByDecisionId,
+      };
     });
   }
 
-  putIdempotencyKey(key: string, blueprintId: string, expiresAt: string): void {
+  putIdempotencyKey(blueprintId: string, key: string, expiresAt: string): void {
     this.db
       .insert(idempotencyKeys)
       .values({ key, blueprintId, expiresAt })
-      .onConflictDoUpdate({ target: idempotencyKeys.key, set: { expiresAt } })
+      .onConflictDoUpdate({ target: [idempotencyKeys.blueprintId, idempotencyKeys.key], set: { expiresAt } })
       .run();
   }
 
   /**
    * TTL is enforced HERE, not by sweep timing: an expired key never matches
-   * even if the sweeper hasn't run yet (sage R-103 finding).
+   * even if the sweeper hasn't run yet. Scoped per blueprint — a key for one
+   * blueprint never suppresses another's work. Boundary: a key is valid
+   * strictly BEFORE expiresAt; the sweep deletes at lte(expiresAt, now) —
+   * same boundary, no immortal rows (sage R-103 cycle-2 findings).
    */
-  hasIdempotencyKey(key: string, now: string): boolean {
-    const row = this.db.select().from(idempotencyKeys).where(eq(idempotencyKeys.key, key)).get();
+  hasIdempotencyKey(blueprintId: string, key: string, now: string): boolean {
+    const row = this.db
+      .select()
+      .from(idempotencyKeys)
+      .where(and(eq(idempotencyKeys.blueprintId, blueprintId), eq(idempotencyKeys.key, key)))
+      .get();
     return row !== undefined && row.expiresAt > now;
   }
 
   sweepIdempotencyKeys(now: string): number {
-    this.db.delete(idempotencyKeys).where(lt(idempotencyKeys.expiresAt, now)).run();
+    this.db.delete(idempotencyKeys).where(lte(idempotencyKeys.expiresAt, now)).run();
     const [swept] = (this.db.get<[number]>(sql`SELECT changes()`) ?? [0]) as [number];
     return swept;
   }

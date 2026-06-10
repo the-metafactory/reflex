@@ -36,13 +36,15 @@ CREATE TABLE `guard_state` (
 	`cooldown_until` text,
 	`run_lock_holder` text,
 	`run_lock_since` text,
-	`buffered_impulse` text
+	`buffered_impulse` text,
+	`buffered_by_decision_id` text
 );
 --> statement-breakpoint
 CREATE TABLE `idempotency_keys` (
-	`key` text PRIMARY KEY NOT NULL,
+	`key` text NOT NULL,
 	`blueprint_id` text NOT NULL,
-	`expires_at` text NOT NULL
+	`expires_at` text NOT NULL,
+	PRIMARY KEY(`blueprint_id`, `key`)
 );
 --> statement-breakpoint
 CREATE INDEX `idempotency_expiry_idx` ON `idempotency_keys` (`expires_at`);--> statement-breakpoint
