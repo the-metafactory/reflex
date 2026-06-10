@@ -1,0 +1,21 @@
+{
+  "name": "@the-metafactory/reflex",
+  "version": "0.1.0",
+  "description": "Reflex — the activation runtime of the metafactory ecosystem",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "bun test test/",
+    "test:integration": "REFLEX_INTEGRATION=1 bun test test/integration/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#f5ec8658030e2fc185f123b06d8bf94d9f74cd84",
+    "yaml": "^2.6.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  }
+}
