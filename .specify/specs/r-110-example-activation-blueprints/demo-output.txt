@@ -1,0 +1,23 @@
+$ ./examples/demo.sh   (captured 2026-06-11, local nats-server -js, pre-PR)
+=== reflex status ===
+reflex-daemon 0.1.0 (instance 6314f0fd)
+blueprints: 3 (manual: 1, bus: 1, schedule: 1)
+Matched Decisions awaiting approval: 0
+bus: published 0, received 1, queued 0, dropped 0
+next ticks: pr-stats-daily @ 2026-06-11T05:00:00.000Z
+
+=== reflex fire f-testing ===
+fired (decision f912fbf0-cfa1-4788-a379-1f295cd5d43d)
+
+=== reflex pending (Matched Decisions awaiting approval) ===
+Matched Decisions awaiting approval:
+(none)
+
+=== reflex history ===
+at                        blueprintId  outcome  reason  decisionId
+------------------------  -----------  -------  ------  ------------------------------------
+2026-06-10T22:42:33.214Z  f-testing    fired            f912fbf0-cfa1-4788-a379-1f295cd5d43d
+
+=== stopping daemon ===
+[reflex-daemon] stopped
+demo complete — re-run to see cooldown/guard behavior as honest Blocked entries

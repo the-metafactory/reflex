@@ -160,3 +160,13 @@ describe("ReflexBus", () => {
     ).toThrow(/definitely-missing\.creds/);
   });
 });
+
+describe("nats.insecure boundary", () => {
+  it("loopback-only: a remote URL with insecure=true throws", () => {
+    expect(() =>
+      createReflexBus(
+        testConfig({ nats: { url: "nats://bus.example.com:4222", creds: "/x", insecure: true } }),
+      ),
+    ).toThrow(/loopback-only/);
+  });
+});

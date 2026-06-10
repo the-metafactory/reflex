@@ -55,7 +55,7 @@ IN: three sidecar examples, README walk-through, demo.sh, end-to-end suite, vali
 | demo.sh re-run | cooldown → honest Blocked history entries | by design; script prints the explanation | none |
 | Copied example w/o id change | R-102 DuplicateIdError naming both files | rename id | load refused |
 | Loader/test rig failure (DB, InMemory bus) | suite fails loudly with the rig error | standard test debugging; rig identical to 5 merged features' rigs | CI-only |
-| Fake-clock drift vs croner | impossible: schema validates cron with the same croner the scheduler runs (R-102 FR-9) | n/a | n/a |
+| Fake-clock drift vs croner | expression-validity parity guaranteed (same croner validates and runs, R-102 FR-9); RUNTIME tick parity is proven by R-105's real-croner tests, not by this suite (which evaluates schedule impulses directly) | covered upstream | n/a |
 
 ## Example YAML (committed shape, FR-1 — others analogous)
 
