@@ -7,6 +7,7 @@ import {
   metricsMiddleware,
 } from "@the-metafactory/myelin";
 import type {
+  EnvelopePublishInput,
   EnvelopeRequestInput,
   MyelinEnvelope,
   SubscribeOptions,
@@ -14,6 +15,7 @@ import type {
   TransportPublisher,
   TransportSubscriber,
 } from "@the-metafactory/myelin";
+import { BoundedPublishQueue } from "./queue";
 import type { ReflexConfig } from "../config/schema";
 import {
   buildActivationDecision,
@@ -41,6 +43,8 @@ export type ReplyHandler = (envelope: MyelinEnvelope) => Promise<{
 export interface ReflexBusOptions {
   /** Inject a transport (tests: InMemoryTransport). Default: NATS from config. */
   transport?: TransportPublisher & TransportSubscriber;
+  /** Retry-flush cadence for the outage queue. Default 1000ms. */
+  flushIntervalMs?: number;
 }
 
 export interface ReflexBus {
@@ -120,14 +124,49 @@ export function createReflexBus(cfg: ReflexConfig, options: ReflexBusOptions = {
     };
   }
 
+  // Outage queue (FR-8): a rejected publish is enqueued, never thrown to the
+  // caller — the decision row in SQLite is the audit truth; the wire catches
+  // up on reconnect. Drop-oldest beyond the limit, loudly.
+  const queue = new BoundedPublishQueue<EnvelopePublishInput>(cfg.publishQueueLimit);
+  let flushTimer: ReturnType<typeof setInterval> | null = null;
+
+  function ensureFlushTimer(): void {
+    if (flushTimer) return;
+    flushTimer = setInterval(async () => {
+      const { flushed } = await queue.flush(async (item) => {
+        await envelopeTransport.publish(item);
+      });
+      if (flushed > 0) lastPublishAt = new Date().toISOString();
+      if (queue.size === 0 && flushTimer) {
+        clearInterval(flushTimer);
+        flushTimer = null;
+      }
+    }, options.flushIntervalMs ?? 1000);
+  }
+
+  async function publishOrQueue(input: EnvelopePublishInput): Promise<void> {
+    try {
+      await envelopeTransport.publish(input);
+      lastPublishAt = new Date().toISOString();
+    } catch (error) {
+      const droppedItem = queue.enqueue(input);
+      if (droppedItem) {
+        console.warn(
+          `[reflex-bus] publish queue overflow — dropped oldest (type ${droppedItem.type}); ` +
+            `queue limit ${cfg.publishQueueLimit}`,
+        );
+      }
+      console.warn(`[reflex-bus] publish failed, queued (${queue.size}): ${(error as Error).message}`);
+      ensureFlushTimer();
+    }
+  }
+
   return {
     async publishFired(input) {
-      await envelopeTransport.publish(buildActivationFired(cfg, input));
-      lastPublishAt = new Date().toISOString();
+      await publishOrQueue(buildActivationFired(cfg, input));
     },
     async publishDecision(input) {
-      await envelopeTransport.publish(buildActivationDecision(cfg, input));
-      lastPublishAt = new Date().toISOString();
+      await publishOrQueue(buildActivationDecision(cfg, input));
     },
     subscribe(subject, handler, options) {
       return envelopeTransport.subscribe(subject, containHandler(subject, handler), options);
@@ -160,13 +199,17 @@ export function createReflexBus(cfg: ReflexConfig, options: ReflexBusOptions = {
         published: published.value,
         received: receivedCounter.value,
         handlerErrors,
-        queued: 0,
-        dropped: 0,
+        queued: queue.size,
+        dropped: queue.droppedCount,
         lastPublishAt,
       };
     },
     raw: transport,
     async close() {
+      if (flushTimer) {
+        clearInterval(flushTimer);
+        flushTimer = null;
+      }
       await envelopeTransport.close();
     },
   };

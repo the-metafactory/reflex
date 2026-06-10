@@ -104,6 +104,56 @@ describe("ReflexBus", () => {
     await bus.close();
   });
 
+  it("queues publishes during an outage and flushes on recovery", async () => {
+    const inner = createTransport({ type: "memory" });
+    let down = false;
+    const flaky = {
+      publish: (subject: string, envelope: never) => {
+        if (down) return Promise.reject(new Error("connection lost"));
+        return inner.publish(subject, envelope);
+      },
+      request: inner.request.bind(inner),
+      subscribe: inner.subscribe.bind(inner),
+      subscribeBestEffort: inner.subscribeBestEffort.bind(inner),
+      close: inner.close.bind(inner),
+    };
+    const bus = createReflexBus(cfg, { transport: flaky as never, flushIntervalMs: 20 });
+    const received: unknown[] = [];
+    await bus.subscribe(FIRED_SUBJECT, async (e) => {
+      received.push(e);
+    });
+
+    down = true;
+    await bus.publishFired(firedInput()); // must NOT reject
+    await bus.publishFired(firedInput());
+    expect(bus.metrics().queued).toBe(2);
+    expect(received).toHaveLength(0);
+
+    down = false;
+    await Bun.sleep(80); // flush timer fires
+    expect(bus.metrics().queued).toBe(0);
+    expect(received).toHaveLength(2);
+    await bus.close();
+  });
+
+  it("drops oldest beyond the queue limit and counts it", async () => {
+    const failing = {
+      publish: () => Promise.reject(new Error("down")),
+      request: () => Promise.reject(new Error("down")),
+      subscribe: () => Promise.resolve({ unsubscribe: async () => {} }),
+      subscribeBestEffort: () => Promise.resolve({ unsubscribe: async () => {} }),
+      close: async () => {},
+    };
+    const bus = createReflexBus(testConfig({ publishQueueLimit: 2 }), {
+      transport: failing as never,
+      flushIntervalMs: 100_000,
+    });
+    for (let i = 0; i < 3; i++) await bus.publishFired(firedInput());
+    expect(bus.metrics().queued).toBe(2);
+    expect(bus.metrics().dropped).toBe(1);
+    await bus.close();
+  });
+
   it("fails fast on nats transport with missing creds file", () => {
     expect(() =>
       createReflexBus(testConfig({ nats: { url: "nats://127.0.0.1:4222", creds: "/tmp/definitely-missing.creds" } })),
