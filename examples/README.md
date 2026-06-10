@@ -39,4 +39,4 @@ The CLI produces a `manual` Impulse through the full pipeline — policy and eve
 ./examples/demo.sh
 ```
 
-Starts a daemon against your local `nats-server -js`, fires `f-testing`, shows `pending`/`history`, and stops cleanly. Running it twice demonstrates guard honesty: the second walk's blocks appear as Blocked Decisions, not errors.
+Starts a daemon against your local `nats-server -js`, fires `f-testing`, shows `pending`/`history`, and stops cleanly. The walk fires the same input twice: the duplicate is blocked by the always-on Idempotency Key guard — guard behavior lands in history as an honest Blocked Decision, not an error.

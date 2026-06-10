@@ -46,10 +46,12 @@ echo; echo "=== reflex status ==="
 run_cli status
 echo; echo "=== reflex fire f-testing ==="
 run_cli fire f-testing --input '{"suite":"smoke"}'
+echo; echo "=== reflex fire f-testing (same input again — the always-on Idempotency Key guard blocks the duplicate) ==="
+run_cli fire f-testing --input '{"suite":"smoke"}'
 echo; echo "=== reflex pending (Matched Decisions awaiting approval) ==="
 run_cli pending
 echo; echo "=== reflex history ==="
 run_cli history --limit 5
 echo; echo "=== stopping daemon ==="
 kill "$DAEMON_PID"; wait "$DAEMON_PID" 2>/dev/null || true
-echo "demo complete — re-run to see cooldown/guard behavior as honest Blocked entries"
+echo "demo complete — the duplicate fire above shows guard behavior as an honest Blocked entry"
