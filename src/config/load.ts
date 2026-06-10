@@ -86,5 +86,7 @@ export function loadConfig(options: LoadOptions = {}): ReflexConfig {
     nats: parsed.nats,
     publishQueueLimit: parsed.publish_queue_limit,
     sovereignty: parsed.sovereignty,
+    watchRoots: parsed.watch_roots,
+    activationsDir: parsed.activations_dir,
   };
 }

@@ -23,5 +23,21 @@ export {
   type ReflexActor,
 } from "./bus/envelopes";
 export { ensureReflexStream, REFLEX_STREAM_NAME, reflexStreamSubjects } from "./bus/stream";
+export {
+  ACTIVATION_SCHEMA_ID,
+  parseActivationDocument,
+  parseDuration,
+} from "./activation/schema";
+export type {
+  ActivationBlueprint,
+  ActivationGuards,
+  ActivationPolicy,
+  ImpulseKind,
+  WhenBlock,
+} from "./activation/types";
+export { BlueprintStore, DuplicateIdError, loadBlueprintSet } from "./activation/store";
+export { discoverActivationFiles, type DiscoverOptions } from "./activation/sources";
+export { ActivationWatcher, type WatcherOptions } from "./activation/watcher";
+export { validatePaths, type ValidationResult } from "./activation/validate-cli";
 // BoundedPublishQueue stays module-private (sage R-101 review): callers need
 // createReflexBus + metrics, not the outage-buffer implementation.
