@@ -26,35 +26,35 @@ features:
     status: planned
     iteration: 1
     depends: [R-101]
-    description: "metafactory/activation/v1 zod schema. Load reflex.yaml sidecars from configured roots + ~/.config/reflex/activations/*.yaml, merged; duplicate rule id = load error. File watcher hot-reloads rule set atomically; pending approvals for removed rules expire with reason rule-removed. reflex validate works daemon-less."
+    description: "metafactory/activation/v1 zod schema. Load reflex.yaml sidecars from configured roots + ~/.config/reflex/activations/*.yaml, merged; duplicate blueprint id = load error. File watcher hot-reloads blueprint set atomically; Matched Decisions for removed blueprints expire with reason blueprint-removed. reflex validate works daemon-less."
 
   - id: R-103
     name: "SQLite storage (Drizzle)"
     status: planned
     iteration: 1
     depends: []
-    description: "Tables: decisions, approvals, guard_state, fired_events at ~/.local/state/reflex/reflex.db. Ignored decisions stored as per-rule counters, not rows."
+    description: "Tables: decisions, approvals, guard_state, fired_events at ~/.local/state/reflex/reflex.db. Ignored decisions stored as per-blueprint counters, not rows."
 
   - id: R-104
     name: "Decision pipeline core"
     status: planned
     iteration: 1
     depends: [R-102, R-103]
-    description: "Impulse -> rule evaluation -> Activation Decision (ignored/matched/blocked/fired) -> policy (auto/approval/disabled) -> guards (cooldown, run lock with skip/buffer/allow overlap, idempotency key) -> Activation Event publish to mf.{net}.reflex.activation.fired.{target}. Decision audit events on mf.{net}.reflex.activation.decision.{outcome}. Dry-run path emits nothing."
+    description: "Impulse -> rule evaluation -> Activation Decision (ignored/matched/blocked/fired/denied/expired) -> policy (auto/approval/disabled) -> guards (cooldown, run lock with skip|buffer conflict modes, idempotency key) -> Activation Event publish to mf.{net}.reflex.activation.fired.{target}. Decision audit events on mf.{net}.reflex.activation.decision.{outcome}. Dry Run produces a Dry Run Verdict: no guard mutation, no events, not in decision history."
 
   - id: R-105
-    name: "Scheduler trigger (cron impulses)"
+    name: "Schedule impulse source (cron)"
     status: planned
     iteration: 1
     depends: [R-104]
-    description: "Internal impulse source: cron expressions with timezone (croner). Drives schedule-type activation rules."
+    description: "Internal impulse source: cron expressions with timezone (croner). Drives schedule-kind blueprints."
 
   - id: R-106
     name: "Manual fire + approval flow"
     status: planned
     iteration: 1
     depends: [R-104]
-    description: "reflex fire <rule> --input json as programmatic impulse. Approval lifecycle: matched decisions wait, reflex approve/deny <decision-id>, per-rule approval_timeout (default 1h) expires to terminal state."
+    description: "reflex fire <blueprint-id> --input json as programmatic impulse. Approval lifecycle: matched decisions wait, reflex approve/deny <decision-id>, per-blueprint approval_timeout (default 1h) resolves to an Expired Decision; deny produces a Denied Decision."
 
   - id: R-107
     name: "CLI over NATS request/reply"
@@ -64,22 +64,22 @@ features:
     description: "reflex status/list/fire/approve/deny/pending/history/test/validate. Daemon serves mf.{net}.reflex.cmd.> request/reply; CLI is a thin NATS client. Cortex can issue identical commands later."
 
   - id: R-108
-    name: "Event trigger (bus subscription + matcher)"
+    name: "Bus impulse source (subscription + matcher)"
     status: planned
     iteration: 1
     depends: [R-104]
-    description: "Per-rule NATS subject subscriptions; match = subject pattern + flat field-equals conditions on CloudEvents data. No expression language in v0. Also consumes mf.{net}.pulse.run.> outcomes for run-lock release and buffer overlap firing."
+    description: "Per-blueprint NATS subject subscriptions; match = subject pattern + flat field-equals conditions on CloudEvents data. No expression language in v0. Also consumes mf.{net}.pulse.run.> outcomes for Run Lock release and Buffered Impulse re-presentation."
 
   - id: R-109
-    name: "Minimal webhook listener"
+    name: "Minimal http impulse source"
     status: planned
     iteration: 1
     depends: [R-104]
-    description: "Localhost HTTP endpoint auto-generated per webhook-type rule (POST /hook/{rule-id}), bearer-token auth only. External impulse source. Windmill pattern, deliberately minimal."
+    description: "Localhost HTTP endpoint auto-generated per http-kind blueprint (POST /hook/{blueprint-id}), bearer-token auth only. External impulse source. Windmill pattern, deliberately minimal."
 
   - id: R-110
     name: "Example activation blueprints"
     status: planned
     iteration: 1
     depends: [R-105, R-106, R-108]
-    description: "Three committed examples: F_PR_STATS daily schedule, Pilot 30-min scan (event + approval), F_TESTING manual trigger. Serve as living docs and integration-test fixtures."
+    description: "Three committed examples: F_PR_STATS daily schedule, Pilot 30-min scan (bus + approval), F_TESTING manual impulse. Serve as living docs and integration-test fixtures."
