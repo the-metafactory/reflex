@@ -48,7 +48,7 @@ describe("validatePaths", () => {
     expect(result.blueprints.map((b) => b.id).sort()).toEqual(["good-one", "sidecar-one"]);
   });
 
-  it("catches duplicate ids across files", async () => {
+  it("catches duplicate ids across files and purges the contested id from results", async () => {
     const dir = mkdtempSync(join(tmpdir(), "reflex-validate-"));
     writeFileSync(join(dir, "one.yaml"), GOOD);
     writeFileSync(join(dir, "two.yaml"), GOOD);
@@ -56,6 +56,8 @@ describe("validatePaths", () => {
     expect(result.ok).toBe(false);
     expect(result.errors[0]!.message).toContain("good-one");
     expect(result.errors[0]!.message).toContain("one.yaml");
+    // The contested id must NOT surface as a clean blueprint.
+    expect(result.blueprints.map((b) => b.id)).not.toContain("good-one");
   });
 
   it("an invalid file contributes NO blueprints, not partial ones", async () => {

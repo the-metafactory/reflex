@@ -12,8 +12,10 @@ export interface WatcherOptions {
  * Hot-reload (spec FR-5): watch both config surfaces at directory level
  * (atomic-rename editor writes land as directory events), debounce, then
  * re-discover + re-parse the FULL set and atomically swap. Any failure
- * keeps the last good set — a broken edit never takes down a running set.
- * Content hashing avoids no-op swaps when events fire without changes.
+ * BEFORE the swap (read, parse, merge) keeps the last good set — a broken
+ * edit never takes down a running set. The swap is the commit point;
+ * subscriber callbacks run after it and are error-contained. Content
+ * hashing avoids no-op swaps when events fire without changes.
  */
 export class ActivationWatcher {
   private watchers: FSWatcher[] = [];
@@ -96,18 +98,34 @@ export class ActivationWatcher {
   }
 
   private async reload(): Promise<void> {
+    // Phase 1 — everything that can REJECT the reload happens before swap;
+    // the last-good-set guarantee covers exactly this phase.
+    let next;
+    let hash: string;
     try {
-      const { hash, docs } = await this.readCorpus();
-      if (hash === this.lastHash) return; // event without content change
-      const next = mergeBlueprints(docs.map((d) => parseActivationDocument(d.text, d.file)));
-      this.store.swap(next);
-      this.lastHash = hash;
-      this.lastErrorMessage = null;
-      for (const cb of this.reloadCallbacks) cb();
+      const corpus = await this.readCorpus();
+      if (corpus.hash === this.lastHash) return; // event without content change
+      hash = corpus.hash;
+      next = mergeBlueprints(corpus.docs.map((d) => parseActivationDocument(d.text, d.file)));
     } catch (error) {
       // Last-good-set policy: log, keep serving the previous set.
       this.lastErrorMessage = (error as Error).message;
       console.error(`[reflex-config] reload rejected — keeping last good set:\n${this.lastErrorMessage}`);
+      return;
+    }
+
+    // Phase 2 — commit. The swap is the commit point; subscriber callbacks
+    // run after it and are contained, so they can neither roll back nor
+    // misreport an already-committed reload (sage R-102 cycle-2 finding).
+    this.store.swap(next);
+    this.lastHash = hash;
+    this.lastErrorMessage = null;
+    for (const cb of this.reloadCallbacks) {
+      try {
+        cb();
+      } catch (error) {
+        console.error(`[reflex-config] reload callback failed (set already live): ${(error as Error).message}`);
+      }
     }
   }
 }

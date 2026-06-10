@@ -22,27 +22,26 @@ export interface ValidationResult {
  * (sage R-102 finding).
  */
 export async function validatePaths(paths: string[]): Promise<ValidationResult> {
-  const files: string[] = [];
+  const fileSet = new Set<string>();
   for (const path of paths) {
     if (!existsSync(path)) {
       return { ok: false, blueprints: [], errors: [{ file: path, message: `path not found: ${path}` }] };
     }
     if (statSync(path).isDirectory()) {
       for await (const rel of new Bun.Glob("**/reflex.yaml").scan({ cwd: path })) {
-        files.push(join(path, rel));
+        fileSet.add(join(path, rel));
       }
       for await (const rel of new Bun.Glob("*.yaml").scan({ cwd: path })) {
-        const abs = join(path, rel);
-        if (!files.includes(abs)) files.push(abs);
+        fileSet.add(join(path, rel));
       }
     } else {
-      files.push(path);
+      fileSet.add(path);
     }
   }
 
   const errors: ValidationResult["errors"] = [];
   const byId = new Map<string, ActivationBlueprint>();
-  for (const file of [...new Set(files)].sort()) {
+  for (const file of [...fileSet].sort()) {
     try {
       const parsed = parseActivationDocument(await Bun.file(file).text(), file);
       // Stage the whole file first; merge only if it is clean end-to-end.
@@ -56,6 +55,11 @@ export async function validatePaths(paths: string[]): Promise<ValidationResult> 
       }
       for (const [id, blueprint] of staged) byId.set(id, blueprint);
     } catch (error) {
+      // A contested id is poisoned: the earlier copy must not surface as a
+      // clean blueprint from an invalid corpus (sage R-102 cycle-2 finding).
+      if (error instanceof DuplicateIdError) {
+        byId.delete(error.id);
+      }
       errors.push({ file, message: (error as Error).message });
     }
   }
