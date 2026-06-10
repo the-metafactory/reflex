@@ -72,7 +72,7 @@ features:
 
   - id: R-109
     name: "Minimal http impulse source"
-    status: planned
+    status: done
     iteration: 1
     depends: [R-104]
     description: "Localhost HTTP endpoint auto-generated per http-kind blueprint (POST /hook/{blueprint-id}), bearer-token auth only. External impulse source. Windmill pattern, deliberately minimal."
