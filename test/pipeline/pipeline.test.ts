@@ -57,7 +57,11 @@ function rig(blueprints: ActivationBlueprint[], nowRef = { now: T0 }) {
     }),
   ]);
   const pipeline = new Pipeline({ store, repo, bus, nowFn: () => nowRef.now });
-  return { pipeline, repo, store, bus, published, ready, close, nowRef };
+  const closeAll = async () => {
+    await bus.close();
+    await close();
+  };
+  return { pipeline, repo, store, bus, published, ready, close: closeAll, nowRef };
 }
 
 async function settle() {
@@ -80,7 +84,7 @@ describe("scenario 1: auto-fire happy path", () => {
     expect(fired.correlation_id).toBe(result.correlationId);
     expect(repo.getDecision(result.decisionId)!.outcome).toBe("fired");
     expect(published.some((e) => e.type === "reflex.activation.decision.fired")).toBe(true);
-    close();
+    await close();
   });
 
   it("disabled policy → counter only, no rows, nothing published", async () => {
@@ -92,7 +96,7 @@ describe("scenario 1: auto-fire happy path", () => {
     expect(repo.historyFor({ blueprintId: "bp" })).toEqual([]);
     expect(repo.ignoredCount("bp", "2026-06-10")).toBe(1);
     expect(published).toEqual([]);
-    close();
+    await close();
   });
 });
 
@@ -113,7 +117,7 @@ describe("scenario 2: approval parks, approve fires", () => {
     expect(repo.getDecision(resolved.decisionId)!.resolutionOf).toBe(matched.decisionId);
     expect(repo.getApproval(matched.decisionId)!.state).toBe("approved");
     expect(published.some((e) => e.type === "reflex.activation.fired")).toBe(true);
-    close();
+    await close();
   });
 
   it("deny is terminal; later approve conflicts naming the state", async () => {
@@ -127,7 +131,7 @@ describe("scenario 2: approval parks, approve fires", () => {
     await expect(
       pipeline.resolveMatched(matched.decisionId, "approve", { type: "operator", id: "jc" }),
     ).rejects.toThrow(ConflictError);
-    close();
+    await close();
   });
 
   it("approve after cooldown engaged → honest Blocked linked to matched", async () => {
@@ -146,7 +150,7 @@ describe("scenario 2: approval parks, approve fires", () => {
     expect(resolved.reason).toBe("cooldown");
     expect(repo.getDecision(resolved.decisionId)!.resolutionOf).toBe(matched.decisionId);
     expect(repo.getApproval(matched.decisionId)!.state).toBe("approved");
-    close();
+    await close();
   });
 });
 
@@ -164,7 +168,7 @@ describe("scenario 3: cooldown blocks with named reason", () => {
     expect(second.reason).toBe("cooldown");
     expect(repo.getDecision(second.decisionId)!.guardBlockReason).toBe("cooldown");
     expect(published.filter((e) => e.type === "reflex.activation.fired")).toHaveLength(1);
-    close();
+    await close();
   });
 });
 
@@ -190,14 +194,14 @@ describe("scenario 4: buffer holds newest, re-presents once", () => {
     expect(row.impulse.payload).toEqual({ n: 2 }); // newest won
     if (b2.outcome === "blocked") expect(row.resolutionOf).toBe(b2.decisionId); // causation link
     expect(repo.takeBufferedImpulse("bp")).toBeNull(); // re-presented once
-    close();
+    await close();
   });
 
   it("unknown correlation is a warn no-op", async () => {
     const { pipeline, ready, close } = rig([bp()]);
     await ready;
     expect(await pipeline.onRunCompleted(crypto.randomUUID(), "succeeded")).toBeNull();
-    close();
+    await close();
   });
 });
 
@@ -220,7 +224,7 @@ describe("scenario 5: dry run mutates nothing", () => {
     expect(JSON.stringify(repo.historyFor({ blueprintId: "bp", limit: 1000 }))).toBe(rowsBefore);
     expect(JSON.stringify(repo.getGuardState("bp"))).toBe(guardBefore);
     expect(published.length).toBe(publishedBefore);
-    close();
+    await close();
   });
 });
 
@@ -235,7 +239,7 @@ describe("scenario 6: double-fire race prevented", () => {
       ]);
       const outcomes = [a.outcome, b.outcome].sort();
       expect(outcomes).toEqual(["blocked", "fired"]);
-      close();
+      await close();
     }
   }, 30_000);
 });
@@ -260,7 +264,7 @@ describe("fire path ordering", () => {
     expect(repo.getDecision(result.decisionId)!.outcome).toBe("fired");
     expect(bus.metrics().queued).toBe(2); // fired + decision audit envelopes
     await bus.close();
-    close();
+    await close();
   });
 });
 
@@ -275,6 +279,29 @@ describe("performance (NFR-1)", () => {
     }
     const perCall = (performance.now() - start) / 50;
     expect(perCall).toBeLessThan(25);
-    close();
+    await close();
+  });
+});
+
+describe("cycle-2 review fixes", () => {
+  it("no-match ignores are counted", async () => {
+    const { pipeline, repo, ready, close } = rig([bp()]);
+    await ready;
+    await pipeline.evaluate(impulse({ blueprintId: "ghost" }));
+    expect(repo.ignoredCount("ghost", "2026-06-10")).toBe(1);
+    await close();
+  });
+
+  it("orphaned buffer (blueprint removed) is discarded loudly, not silently", async () => {
+    const { pipeline, repo, store, ready, close } = rig([bp({ guards: { runLock: "buffer" } })]);
+    await ready;
+    const fired = await pipeline.evaluate(impulse({ payload: { n: 0 } }));
+    if (fired.outcome !== "fired") throw new Error("unreachable");
+    await pipeline.evaluate(impulse({ payload: { n: 1 } })); // buffered
+    store.swap([]); // blueprint removed via hot-reload
+    const result = await pipeline.onRunCompleted(fired.correlationId, "succeeded");
+    expect(result).toBeNull();
+    expect(repo.takeBufferedImpulse("bp")).toBeNull(); // consumed (discarded), not leaked
+    await close();
   });
 });

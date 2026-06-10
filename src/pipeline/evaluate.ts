@@ -44,6 +44,9 @@ export class Pipeline {
     const now = this.nowFn();
     const blueprint = this.store.get(impulse.blueprintId);
     if (!blueprint || blueprint.kind !== impulse.kind) {
+      // No-match ignores are counted too — every ignored evaluation is
+      // visible in counters (sage R-104 cycle-2 finding).
+      this.repo.bumpIgnored(impulse.blueprintId, now.slice(0, 10));
       return { outcome: "ignored", reason: "no-match" };
     }
     if (blueprint.policy === "disabled") {
@@ -207,13 +210,7 @@ export class Pipeline {
       // honest guards+fire path — its Fired OR Blocked row links the matched
       // decision via causation (spec edge: cooldown engaged since match).
       this.repo.approveWaiting(decisionId, actor, now);
-      const impulse: Impulse = {
-        kind: matched.impulse.kind,
-        blueprintId: matched.blueprintId,
-        payload: matched.impulse.payload,
-        receivedAt: matched.impulse.receivedAt,
-        actor,
-      };
+      const impulse = impulseFromSnapshot(matched.impulse, matched.blueprintId, actor);
       return this.guardsAndFire(blueprint, impulse, now, decisionId);
     });
   }
@@ -232,17 +229,23 @@ export class Pipeline {
     if (!decision) return null;
     const blueprintId = decision.blueprintId;
     this.repo.releaseRunLock(blueprintId, correlationId);
+    // Blueprint checked BEFORE consuming the buffer: a hot-reload-removed
+    // blueprint must not silently swallow the impulse (sage cycle-2 finding)
+    // — the orphaned buffer is discarded LOUDLY.
+    const blueprint = this.store.get(blueprintId);
+    if (!blueprint) {
+      const orphan = this.repo.takeBufferedImpulse(blueprintId);
+      if (orphan) {
+        console.warn(
+          `[reflex-pipeline] discarding Buffered Impulse for removed blueprint ${blueprintId} ` +
+            `(buffered by decision ${orphan.bufferedByDecisionId ?? "unknown"})`,
+        );
+      }
+      return null;
+    }
     const buffered = this.repo.takeBufferedImpulse(blueprintId);
     if (!buffered) return null;
-    const blueprint = this.store.get(blueprintId);
-    if (!blueprint) return null;
-    const impulse: Impulse = {
-      kind: buffered.impulse.kind,
-      blueprintId,
-      payload: buffered.impulse.payload,
-      receivedAt: buffered.impulse.receivedAt,
-      actor: { type: "system", id: "reflex-buffer" },
-    };
+    const impulse = impulseFromSnapshot(buffered.impulse, blueprintId, { type: "system", id: "reflex-buffer" });
     return this.serialized(blueprintId, () =>
       this.guardsAndFire(blueprint, impulse, this.nowFn(), buffered.bufferedByDecisionId ?? undefined),
     );
@@ -289,4 +292,12 @@ export class Pipeline {
 
 function snapshot(impulse: Impulse) {
   return { kind: impulse.kind, payload: impulse.payload, receivedAt: impulse.receivedAt };
+}
+
+function impulseFromSnapshot(
+  snap: { kind: Impulse["kind"]; payload: Record<string, unknown>; receivedAt: string },
+  blueprintId: string,
+  actor: ReflexActor,
+): Impulse {
+  return { kind: snap.kind, blueprintId, payload: snap.payload, receivedAt: snap.receivedAt, actor };
 }
