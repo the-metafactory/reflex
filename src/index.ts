@@ -50,5 +50,15 @@ export {
   type DecisionRow,
   type ImpulseSnapshot,
 } from "./store/repository";
+export { Pipeline, type PipelineOptions } from "./pipeline/evaluate";
+export {
+  deriveIdempotencyKey,
+  IDEMPOTENCY_WINDOW_MS,
+  type EvaluateResult,
+  type GuardReason,
+  type Impulse,
+} from "./pipeline/impulse";
+export { checkGuards, type GuardCheck } from "./pipeline/guards";
+export type { DryRunVerdict } from "./pipeline/verdict";
 // BoundedPublishQueue stays module-private (sage R-101 review): callers need
 // createReflexBus + metrics, not the outage-buffer implementation.

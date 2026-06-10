@@ -263,3 +263,18 @@ describe("fire path ordering", () => {
     close();
   });
 });
+
+describe("performance (NFR-1)", () => {
+  it("evaluate stays under budget with 100 blueprints loaded", async () => {
+    const blueprints = Array.from({ length: 100 }, (_, i) => bp({ id: `bp-${i}` }));
+    const { pipeline, ready, close } = rig(blueprints);
+    await ready;
+    const start = performance.now();
+    for (let i = 0; i < 50; i++) {
+      await pipeline.evaluate(impulse({ blueprintId: `bp-${i}`, payload: { i } }));
+    }
+    const perCall = (performance.now() - start) / 50;
+    expect(perCall).toBeLessThan(25);
+    close();
+  });
+});
