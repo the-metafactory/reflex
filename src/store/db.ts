@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
@@ -19,7 +19,9 @@ const MIGRATIONS_DIR = join(import.meta.dir, "../../drizzle");
  */
 export function openDb(path: string): { db: ReflexDb; close: () => void } {
   if (path !== ":memory:") {
-    mkdirSync(dirname(path), { recursive: true });
+    // Decision rows carry impulse payloads — operator-private. 0700 dir,
+    // 0600 files (sage R-103 cycle-3 security finding).
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   }
   let sqlite: Database;
   try {
@@ -28,6 +30,12 @@ export function openDb(path: string): { db: ReflexDb; close: () => void } {
     throw new Error(
       `Cannot open reflex DB at ${path}: ${(error as Error).message} — another reflex instance running?`,
     );
+  }
+  if (path !== ":memory:") {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      const f = `${path}${suffix}`;
+      if (suffix === "" || existsSync(f)) chmodSync(f, 0o600);
+    }
   }
   sqlite.run("PRAGMA journal_mode = WAL;");
   sqlite.run("PRAGMA busy_timeout = 5000;");

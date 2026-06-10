@@ -57,3 +57,14 @@ describe("openDb", () => {
     second.close();
   });
 });
+
+describe("permissions", () => {
+  it("state dir 0700, db file 0600", () => {
+    const dir = mkdtempSync(join(tmpdir(), "reflex-db-"));
+    const path = join(dir, "private/reflex.db");
+    openDb(path).close();
+    const { statSync } = require("node:fs") as typeof import("node:fs");
+    expect(statSync(join(dir, "private")).mode & 0o777).toBe(0o700);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+});

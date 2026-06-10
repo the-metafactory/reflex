@@ -228,24 +228,29 @@ export class Repository {
       .run();
   }
 
+  /**
+   * CAS acquire: the upsert only claims when run_lock_holder IS NULL — a
+   * holder appearing between any read and this write can never be
+   * overwritten (sage R-103 cycle-3 finding). changes() decides the verdict.
+   */
   acquireRunLock(
     blueprintId: string,
     correlationId: string,
     now: string,
   ): { acquired: true } | { acquired: false; holder: string } {
     return this.db.transaction((tx) => {
+      tx.run(sql`
+        INSERT INTO guard_state (blueprint_id, run_lock_holder, run_lock_since)
+        VALUES (${blueprintId}, ${correlationId}, ${now})
+        ON CONFLICT(blueprint_id) DO UPDATE
+          SET run_lock_holder = excluded.run_lock_holder,
+              run_lock_since = excluded.run_lock_since
+          WHERE guard_state.run_lock_holder IS NULL
+      `);
+      const [claimed] = (tx.get<[number]>(sql`SELECT changes()`) ?? [0]) as [number];
+      if (claimed > 0) return { acquired: true as const };
       const current = tx.select().from(guardState).where(eq(guardState.blueprintId, blueprintId)).get();
-      if (current?.runLockHolder) {
-        return { acquired: false as const, holder: current.runLockHolder };
-      }
-      tx.insert(guardState)
-        .values({ blueprintId, runLockHolder: correlationId, runLockSince: now })
-        .onConflictDoUpdate({
-          target: guardState.blueprintId,
-          set: { runLockHolder: correlationId, runLockSince: now },
-        })
-        .run();
-      return { acquired: true as const };
+      return { acquired: false as const, holder: current?.runLockHolder ?? "unknown" };
     });
   }
 
@@ -274,14 +279,22 @@ export class Repository {
       .run();
   }
 
+  /**
+   * Single-taker take: the clearing UPDATE is conditioned on the buffered
+   * value still being present and changes() gates the return — two takers
+   * can never both receive the impulse (sage R-103 cycle-3 finding).
+   */
   takeBufferedImpulse(blueprintId: string): { impulse: ImpulseSnapshot; bufferedByDecisionId: string | null } | null {
     return this.db.transaction((tx) => {
       const row = tx.select().from(guardState).where(eq(guardState.blueprintId, blueprintId)).get();
       if (!row?.bufferedImpulse) return null;
-      tx.update(guardState)
-        .set({ bufferedImpulse: null, bufferedByDecisionId: null })
-        .where(eq(guardState.blueprintId, blueprintId))
-        .run();
+      tx.run(sql`
+        UPDATE guard_state
+        SET buffered_impulse = NULL, buffered_by_decision_id = NULL
+        WHERE blueprint_id = ${blueprintId} AND buffered_impulse IS NOT NULL
+      `);
+      const [cleared] = (tx.get<[number]>(sql`SELECT changes()`) ?? [0]) as [number];
+      if (cleared === 0) return null; // another taker won
       return {
         impulse: JSON.parse(row.bufferedImpulse) as ImpulseSnapshot,
         bufferedByDecisionId: row.bufferedByDecisionId,
