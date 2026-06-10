@@ -181,6 +181,25 @@ export class Repository {
   }
 
   /** Bounded per call (default 500) so a huge timeout backlog cannot stall one sweep tick. */
+  /**
+   * CAS waiting→approved WITHOUT inserting a resolution row: after an
+   * approval the pipeline re-runs guards and records the honest outcome
+   * (Fired or Blocked) itself, linked to the matched decision. Deny/expire
+   * keep using resolveMatched (their resolution row IS the outcome).
+   */
+  approveWaiting(decisionId: string, actor: ReflexActor, now: string): void {
+    this.db
+      .update(approvals)
+      .set({ state: "approved", reason: "operator", actor: JSON.stringify(actor), decidedAt: now })
+      .where(and(eq(approvals.decisionId, decisionId), eq(approvals.state, "waiting")))
+      .run();
+    const [changed] = (this.db.get<[number]>(sql`SELECT changes()`) ?? [0]) as [number];
+    if (changed === 0) {
+      const current = this.getApproval(decisionId);
+      throw new ConflictError(decisionId, current?.state ?? "missing");
+    }
+  }
+
   sweepExpiredApprovals(now: string, limit = 500): Array<{ decisionId: string }> {
     const due = this.db
       .select({ decisionId: approvals.decisionId })
@@ -323,7 +342,8 @@ export class Repository {
       .from(idempotencyKeys)
       .where(and(eq(idempotencyKeys.blueprintId, blueprintId), eq(idempotencyKeys.key, key)))
       .get();
-    return row !== undefined && row.expiresAt > now;
+    // Numeric compare — mixed ISO millisecond forms must not flip validity.
+    return row !== undefined && Date.parse(row.expiresAt) > Date.parse(now);
   }
 
   sweepIdempotencyKeys(now: string): number {
@@ -336,7 +356,7 @@ export class Repository {
 
   recordFiredEvent(input: {
     decisionId: string;
-    envelopeId: string;
+    envelopeId: string | null;
     correlationId: string;
     subject: string;
     publishedAt: string;

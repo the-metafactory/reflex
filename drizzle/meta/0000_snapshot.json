@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "38fa21f3-bce7-49f5-a568-8c890b1b83e2",
+  "id": "ab27beea-7957-4786-b7e0-20f12ee54fe1",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "approvals": {
@@ -164,7 +164,7 @@
           "name": "envelope_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "correlation_id": {

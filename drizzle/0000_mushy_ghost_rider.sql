@@ -24,7 +24,7 @@ CREATE TABLE `decisions` (
 CREATE INDEX `decisions_blueprint_idx` ON `decisions` (`blueprint_id`,`created_at`);--> statement-breakpoint
 CREATE TABLE `fired_events` (
 	`decision_id` text PRIMARY KEY NOT NULL,
-	`envelope_id` text NOT NULL,
+	`envelope_id` text,
 	`correlation_id` text NOT NULL,
 	`subject` text NOT NULL,
 	`published_at` text NOT NULL

@@ -74,7 +74,9 @@ export const firedEvents = sqliteTable(
   "fired_events",
   {
     decisionId: text("decision_id").primaryKey(),
-    envelopeId: text("envelope_id").notNull(),
+    /** Myelin envelope id when known — the transport does not currently
+     * expose it to publishers, so this is nullable (correlation_id joins). */
+    envelopeId: text("envelope_id"),
     correlationId: text("correlation_id").notNull(),
     subject: text("subject").notNull(),
     publishedAt: text("published_at").notNull(),
