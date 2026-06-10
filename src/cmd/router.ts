@@ -10,6 +10,14 @@ import type { ScheduleSource } from "../sources/schedule";
 import type { Repository } from "../store/repository";
 import { CMD_REPLY_TYPE, COMMANDS, PROTOCOL_VERSION, cmdSubject, type CmdRequest, type CmdResponse, type Command } from "./protocol";
 
+function validateActor(raw: unknown): ReflexActor | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const actor = raw as { type?: unknown; id?: unknown };
+  if (actor.type !== "operator" && actor.type !== "agent" && actor.type !== "system") return null;
+  if (typeof actor.id !== "string" || actor.id.length === 0 || actor.id.length > 128) return null;
+  return { type: actor.type, id: actor.id };
+}
+
 export interface RouterDeps {
   cfg: ReflexConfig;
   bus: ReflexBus;
@@ -48,7 +56,28 @@ export class CommandRouter {
   }
 
   private async dispatch(command: Command, request: CmdRequest): Promise<CmdResponse> {
-    const actor: ReflexActor = request.actor ?? { type: "operator", id: "unknown" };
+    // Protocol gate: this router speaks v1 only — newer/missing versions are
+    // rejected, never executed (fail closed; sage R-107 finding).
+    if (request?.v !== PROTOCOL_VERSION) {
+      return {
+        v: PROTOCOL_VERSION,
+        ok: false,
+        error: { code: "protocol-version", message: `daemon speaks protocol v${PROTOCOL_VERSION}; request carried v${String(request?.v)}` },
+      };
+    }
+    // v0 trust model (spec: single-operator): authorization IS bus access —
+    // NATS creds gate the command subjects (DD-72). The actor field is a
+    // CLAIMED identity recorded for audit, not an authenticated principal;
+    // shape-validated, never trusted for authorization. Signed-envelope
+    // identity (myelin identity layer) is the deferred upgrade path.
+    const actor = validateActor(request.actor);
+    if (!actor) {
+      return {
+        v: PROTOCOL_VERSION,
+        ok: false,
+        error: { code: "invalid-input", message: "actor must be {type: operator|agent|system, id: string}" },
+      };
+    }
     const args = request.args ?? {};
     try {
       const result = await this.execute(command, args, actor);
@@ -76,7 +105,7 @@ export class CommandRouter {
         return handlers.approve(String(args.decisionId ?? ""), actor);
       case "deny":
         return handlers.deny(String(args.decisionId ?? ""), actor);
-      case "pending":
+      case "waiting":
         return handlers.listWaiting();
       case "list":
         return {

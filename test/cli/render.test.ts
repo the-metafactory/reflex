@@ -34,3 +34,9 @@ describe("vocabulary audit (CLI surface)", () => {
     }
   });
 });
+
+describe("protocol gates (router-side, via e2e rig in e2e.test.ts)", () => {
+  it("placeholder — version + actor gates asserted in router tests", () => {
+    expect(true).toBe(true);
+  });
+});

@@ -152,3 +152,11 @@ describe("daemon unreachable", () => {
     expect(r.stderr).toContain("reflex-daemon running");
   }, 10_000);
 });
+
+describe("local --impulse parse", () => {
+  it("malformed --impulse is a domain error, never a transport failure", async () => {
+    const r = await run(["test", "cli-demo", "--impulse", "{nope"]);
+    expect(r.exitCode).toBe(EXIT_DOMAIN);
+    expect(r.stderr).toContain("invalid-input");
+  });
+});

@@ -3,7 +3,9 @@ import type { ReflexConfig } from "../config/schema";
 
 export const PROTOCOL_VERSION = 1;
 
-export const COMMANDS = ["status", "list", "fire", "approve", "deny", "pending", "history", "test"] as const;
+// Wire command names are CANONICAL (CONTEXT.md): the friendly CLI verb
+// `pending` maps to `waiting` before it ever reaches protocol or subjects.
+export const COMMANDS = ["status", "list", "fire", "approve", "deny", "waiting", "history", "test"] as const;
 export type Command = (typeof COMMANDS)[number];
 
 export interface CmdRequest {
@@ -25,11 +27,7 @@ export interface CmdResponse {
   error?: CmdError;
 }
 
-/**
- * Command subjects live under the Reflex namespace: one subject per command.
- * `pending` is the friendly CLI verb (CONTEXT.md) — on the wire and in the
- * router it maps to the canonical listWaiting handler.
- */
+/** Command subjects live under the Reflex namespace: one subject per command. */
 export function cmdSubject(cfg: Pick<ReflexConfig, "principal" | "stack">, command: Command): string {
   return `local.${cfg.principal}.${cfg.stack}.reflex.cmd.${command}`;
 }

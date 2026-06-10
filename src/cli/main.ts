@@ -151,7 +151,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     .option("--timeout <ms>", "request timeout", "3000")
     .action(
       remote(
-        "pending",
+        "waiting",
         (data) => {
           const rows = data as Array<Record<string, unknown>>;
           return `Matched Decisions awaiting approval:\n${table(rows, ["decisionId", "blueprintId", "matchedAt", "expiresAt", "impulseSummary"])}`;
@@ -185,13 +185,22 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     .option("--json", "raw JSON output")
     .option("--timeout <ms>", "request timeout", "3000")
     .action(async (blueprintId: string, opts: Record<string, unknown>, cmd: unknown) => {
+      // Local parse FIRST (same as --input): malformed JSON is a domain
+      // error (exit 1), never a fake transport failure (sage R-107 finding).
+      let impulse: Record<string, unknown>;
+      try {
+        impulse = JSON.parse(String(opts.impulse ?? "{}"));
+      } catch {
+        result = { exitCode: EXIT_DOMAIN, stdout: "", stderr: `error [invalid-input]: --impulse is not valid JSON` };
+        return;
+      }
       await remote(
         "test",
         (data) => {
           const d = data as { wouldOutcome: string; reasons: string[] };
           return `DRY RUN — would ${d.wouldOutcome}: ${d.reasons.join("; ")}`;
         },
-        () => ({ blueprintId, impulse: JSON.parse(String(opts.impulse ?? "{}")) }),
+        () => ({ blueprintId, impulse }),
       )(blueprintId, opts, cmd);
     });
 
