@@ -24,7 +24,7 @@ interface Bucket {
 
 /**
  * Minimal HTTP Impulse Source (decision 12): localhost-only listener, one
- * route per http-kind blueprint (`POST /hook/{blueprint-id}`), bearer-token
+ * route per http-kind blueprint (`POST /impulse/{blueprint-id}`), bearer
  * auth only. Auth ALWAYS precedes existence — unauthenticated callers can
  * never distinguish a missing blueprint from a bad token (spec FR-6).
  * Everything richer (public exposure, provider signatures) is post-v0.
@@ -105,6 +105,10 @@ export class HttpSource {
       return json(401, { error: "unauthorized" });
     }
     if (!blueprint || blueprint.kind !== "http") {
+      // Prune per-blueprint state for ids that no longer resolve — a long
+      // daemon under hot-reload churn must not grow buckets unboundedly.
+      this.buckets.delete(blueprintId);
+      this.misconfigWarned.delete(blueprintId);
       return json(404, { error: `no http Activation Blueprint "${blueprintId}" loaded` });
     }
 
