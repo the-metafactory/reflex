@@ -115,9 +115,10 @@ describe("guard state", () => {
   it("idempotency keys: has until swept past TTL", () => {
     const { r, close } = repo();
     r.putIdempotencyKey("k1", "bp", "2026-06-10T10:10:00Z");
-    expect(r.hasIdempotencyKey("k1")).toBe(true);
+    expect(r.hasIdempotencyKey("k1", "2026-06-10T10:05:00Z")).toBe(true);
+    expect(r.hasIdempotencyKey("k1", "2026-06-10T10:15:00Z")).toBe(false); // TTL enforced at read, pre-sweep
     r.sweepIdempotencyKeys("2026-06-10T10:20:00Z");
-    expect(r.hasIdempotencyKey("k1")).toBe(false);
+    expect(r.hasIdempotencyKey("k1", "2026-06-10T10:05:00Z")).toBe(false);
     close();
   });
 });

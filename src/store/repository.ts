@@ -99,7 +99,9 @@ export class Repository {
     const rows = (
       filter.blueprintId ? base.where(eq(decisions.blueprintId, filter.blueprintId)) : base
     )
-      .orderBy(desc(decisions.createdAt), desc(decisions.id))
+      // rowid tiebreak: same-millisecond createdAt must order by insertion,
+      // not by random UUID (flake found in CI: two inserts, one ms).
+      .orderBy(desc(decisions.createdAt), desc(sql`rowid`))
       .limit(filter.limit ?? 50)
       .all();
     return rows.map(hydrateDecision);
@@ -178,20 +180,27 @@ export class Repository {
     });
   }
 
-  sweepExpiredApprovals(now: string): Array<{ decisionId: string }> {
+  /** Bounded per call (default 500) so a huge timeout backlog cannot stall one sweep tick. */
+  sweepExpiredApprovals(now: string, limit = 500): Array<{ decisionId: string }> {
     const due = this.db
       .select({ decisionId: approvals.decisionId })
       .from(approvals)
       .where(and(eq(approvals.state, "waiting"), lte(approvals.expiresAt, now)))
+      .limit(limit)
       .all();
-    for (const { decisionId } of due) {
+    this.expireWaiting(due.map((d) => d.decisionId), "timeout", now);
+    return due;
+  }
+
+  /** Shared expiry path for both sweep flavors (sage R-103 dedup finding). */
+  private expireWaiting(decisionIds: string[], reason: "timeout" | "blueprint-removed", now: string): void {
+    for (const decisionId of decisionIds) {
       try {
-        this.resolveMatched(decisionId, { kind: "expire", resolutionOutcome: "expired", reason: "timeout", now });
+        this.resolveMatched(decisionId, { kind: "expire", resolutionOutcome: "expired", reason, now });
       } catch (error) {
-        if (!(error instanceof ConflictError)) throw error; // raced an approve — fine
+        if (!(error instanceof ConflictError)) throw error; // raced an approve/deny — fine
       }
     }
-    return due;
   }
 
   expireForBlueprint(blueprintId: string, now: string): Array<{ decisionId: string }> {
@@ -201,18 +210,7 @@ export class Repository {
       .innerJoin(decisions, eq(approvals.decisionId, decisions.id))
       .where(and(eq(approvals.state, "waiting"), eq(decisions.blueprintId, blueprintId)))
       .all();
-    for (const { decisionId } of waiting) {
-      try {
-        this.resolveMatched(decisionId, {
-          kind: "expire",
-          resolutionOutcome: "expired",
-          reason: "blueprint-removed",
-          now,
-        });
-      } catch (error) {
-        if (!(error instanceof ConflictError)) throw error;
-      }
-    }
+    this.expireWaiting(waiting.map((w) => w.decisionId), "blueprint-removed", now);
     return waiting.map(({ decisionId }) => ({ decisionId }));
   }
 
@@ -287,8 +285,13 @@ export class Repository {
       .run();
   }
 
-  hasIdempotencyKey(key: string): boolean {
-    return this.db.select().from(idempotencyKeys).where(eq(idempotencyKeys.key, key)).get() !== undefined;
+  /**
+   * TTL is enforced HERE, not by sweep timing: an expired key never matches
+   * even if the sweeper hasn't run yet (sage R-103 finding).
+   */
+  hasIdempotencyKey(key: string, now: string): boolean {
+    const row = this.db.select().from(idempotencyKeys).where(eq(idempotencyKeys.key, key)).get();
+    return row !== undefined && row.expiresAt > now;
   }
 
   sweepIdempotencyKeys(now: string): number {
