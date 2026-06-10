@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#f5ec8658030e2fc185f123b06d8bf94d9f74cd84",
+    "croner": "^10.0.1",
     "yaml": "^2.6.0",
     "zod": "^3.24.0"
   },
