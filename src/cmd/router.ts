@@ -178,6 +178,9 @@ export class CommandRouter {
             waitingApprovals: waiting.ok ? waiting.data.length : -1,
             bus: this.deps.bus.metrics(),
             nextTicks,
+            // Locks held >24h (age-only signal; cause not attributed —
+            // commonly a missing run outcome). Operator-visible.
+            staleLocks: repo.staleLocks(new Date().toISOString(), 24 * 3_600_000),
           },
         };
       }

@@ -235,6 +235,21 @@ export class Repository {
 
   // ── guard state ──────────────────────────────────────────────────────────
 
+  /**
+   * Run Locks held longer than maxAgeMs. The check proves AGE only — the
+   * cause is not attributed (a missing run outcome is one common reason).
+   * Filtering happens in SQL: cost scales with stale rows, not guard state.
+   */
+  staleLocks(now: string, maxAgeMs: number): Array<{ blueprintId: string; holder: string; since: string }> {
+    const cutoff = new Date(Date.parse(now) - maxAgeMs).toISOString();
+    const rows = this.db
+      .select()
+      .from(guardState)
+      .where(and(sql`${guardState.runLockHolder} IS NOT NULL`, lte(guardState.runLockSince, cutoff)))
+      .all();
+    return rows.map((r) => ({ blueprintId: r.blueprintId, holder: r.runLockHolder!, since: r.runLockSince! }));
+  }
+
   getGuardState(blueprintId: string) {
     return this.db.select().from(guardState).where(eq(guardState.blueprintId, blueprintId)).get() ?? null;
   }
@@ -369,12 +384,18 @@ export class Repository {
   }
 
   bumpIgnored(blueprintId: string, day: string): void {
+    this.bumpIgnoredBy(blueprintId, day, 1);
+  }
+
+  /** Coalesced counter add — used by buffered flushes (bus source). */
+  bumpIgnoredBy(blueprintId: string, day: string, count: number): void {
+    if (count <= 0) return;
     this.db
       .insert(ignoredCounters)
-      .values({ blueprintId, day, count: 1 })
+      .values({ blueprintId, day, count })
       .onConflictDoUpdate({
         target: [ignoredCounters.blueprintId, ignoredCounters.day],
-        set: { count: sql`${ignoredCounters.count} + 1` },
+        set: { count: sql`${ignoredCounters.count} + ${count}` },
       })
       .run();
   }

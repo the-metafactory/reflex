@@ -7,6 +7,7 @@ import type { ReflexConfig } from "./config/schema";
 import { CommandRouter } from "./cmd/router";
 import { CommandHandlers } from "./handlers/commands";
 import { Pipeline } from "./pipeline/evaluate";
+import { BusSource } from "./sources/bus";
 import { ScheduleSource } from "./sources/schedule";
 import { openDb } from "./store/db";
 import { defaultDbPath } from "./store/paths";
@@ -71,6 +72,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
   const pipeline = new Pipeline({ store, repo, bus });
   const schedule = new ScheduleSource(store, pipeline);
   const handlers = new CommandHandlers(store, pipeline, repo);
+  const busSource = new BusSource(cfg, store, bus, pipeline, repo);
   const busRef = bus;
   const router = new CommandRouter({
     cfg,
@@ -87,7 +89,10 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
 
   // Lifecycle wiring: hot-reload syncs scheduler jobs + expires waiting
   // decisions of removed blueprints (R-102 FR-6 / CONTEXT.md).
-  watcher.onReload(() => schedule.sync());
+  watcher.onReload(() => {
+    schedule.sync();
+    void busSource.sync();
+  });
   store.onBlueprintsRemoved((ids) => {
     const now = new Date().toISOString();
     for (const id of ids) {
@@ -100,6 +105,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
 
   await watcher.start();
   schedule.start();
+  await busSource.start();
 
   // Approval expiry sweep: timeout'd Matched Decisions resolve to Expired.
   // Runs once now (no immortal waiting rows after downtime), then on an
@@ -128,6 +134,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
       if (stopped) return;
       stopped = true;
       schedule.stop();
+      await busSource.stop();
       await watcher.stop();
       clearInterval(sweepTimer);
       await busRef.close();
