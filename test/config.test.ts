@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,11 +30,17 @@ function writeConfigFile(content: string): string {
   return path;
 }
 
+// Scrub REFLEX_* before each test (isolation within this file), restore the
+// ORIGINAL values after each test — later test files in the same Bun process
+// must see the env they started with (sage R-101 cycle-3 finding: exit-time
+// restore leaks missing-var state across files).
 const saved = cleanEnv();
-afterEach(() => {
+Object.assign(process.env, saved);
+beforeEach(() => {
   cleanEnv();
 });
-process.on("exit", () => {
+afterEach(() => {
+  cleanEnv();
   Object.assign(process.env, saved);
 });
 

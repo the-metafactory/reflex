@@ -28,6 +28,19 @@ export function reflexSource(cfg: Pick<ReflexConfig, "principal">): string {
   return `${cfg.principal}.reflex.activation`;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Myelin requires correlation_id to be a UUID when present. Enforce at the
+ * builder boundary so a bad caller value fails HERE with a named error, not
+ * later inside envelope validation (sage R-101 cycle-3 finding).
+ */
+function assertUuid(value: string, field: string): void {
+  if (!UUID_RE.test(value)) {
+    throw new Error(`${field} must be a UUID (myelin correlation contract), got: "${value}"`);
+  }
+}
+
 export interface ActivationFiredInput {
   /** Target Execution Blueprint reference (opaque to Reflex). */
   target: string;
@@ -46,6 +59,7 @@ export function buildActivationFired(
   cfg: Pick<ReflexConfig, "principal">,
   input: ActivationFiredInput,
 ): EnvelopePublishInput {
+  assertUuid(input.correlationId, "correlationId");
   return {
     source: reflexSource(cfg),
     type: ACTIVATION_FIRED_TYPE,
@@ -83,6 +97,7 @@ export function buildActivationDecision(
       `Decision outcome "${input.outcome}" is not published — ignored decisions are per-blueprint counters, not wire events`,
     );
   }
+  if (input.correlationId) assertUuid(input.correlationId, "correlationId");
   return {
     source: reflexSource(cfg),
     type: `${ACTIVATION_DECISION_TYPE_PREFIX}.${input.outcome}`,

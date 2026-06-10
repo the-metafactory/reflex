@@ -70,4 +70,25 @@ describe("envelope builders", () => {
   it("reflexSource derives from the principal", () => {
     expect(reflexSource(cfg)).toBe("jc.reflex.activation");
   });
+
+  it("rejects non-UUID correlation ids at the builder boundary", () => {
+    expect(() =>
+      buildActivationFired(cfg, {
+        target: "@jc/x",
+        payload: {},
+        idempotencyKey: "k",
+        decisionId: "d",
+        correlationId: "corr-1",
+        actor: { type: "system", id: "t" },
+      }),
+    ).toThrow(/correlationId must be a UUID/);
+    expect(() =>
+      buildActivationDecision(cfg, {
+        outcome: "matched",
+        blueprintId: "b",
+        decisionId: "d",
+        correlationId: "nope",
+      }),
+    ).toThrow(/correlationId must be a UUID/);
+  });
 });
