@@ -16,7 +16,7 @@ features:
 
   - id: R-101
     name: "Myelin transport integration"
-    status: planned
+    status: done
     iteration: 1
     depends: []
     description: "Consume @the-metafactory/myelin (git-pinned): NATSTransport + InMemoryTransport + request-reply + MyelinEnvelope + derived subjects. src/bus/ wrapper, envelope builders for reflex.activation.* types, ensureStream, config file + env overrides, fail-fast startup, bounded publish queue. bun test offline; integration suite on local NATS. Supersedes CloudEvents/DD-68 framing (decision 22)."
