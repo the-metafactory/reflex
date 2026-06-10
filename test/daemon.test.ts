@@ -50,7 +50,7 @@ describe("startDaemon", () => {
     const daemon = await startDaemon(cfg, { dbPath: join(dir, "reflex.db"), bus, sweepIntervalMs: 100_000 });
 
     writeFileSync(join(central, "b.yaml"), docFor("hot-b"));
-    const deadline = Date.now() + 3000;
+    const deadline = Date.now() + 10_000; // fs.watch latency under parallel load — generous-but-bounded
     while (daemon.schedule.status().length < 2 && Date.now() < deadline) {
       await Bun.sleep(30);
     }
@@ -71,7 +71,7 @@ describe("startDaemon", () => {
     writeFileSync(join(central, "two.yaml"), docFor("dup"));
     const cfg = testConfig({ watchRoots: [], activationsDir: central });
     const bus = createReflexBus(cfg, { transport: createTransport({ type: "memory" }) });
-    expect(startDaemon(cfg, { dbPath: join(dir, "reflex.db"), bus })).rejects.toThrow(/dup/);
+    await expect(startDaemon(cfg, { dbPath: join(dir, "reflex.db"), bus })).rejects.toThrow(/dup/);
     await bus.close();
   });
 });

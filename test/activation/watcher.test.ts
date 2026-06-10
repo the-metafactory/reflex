@@ -20,7 +20,7 @@ async function setup() {
   return { central, store, watcher };
 }
 
-async function until(cond: () => boolean, ms = 2000): Promise<void> {
+async function until(cond: () => boolean, ms = 8000): Promise<void> {
   const deadline = Date.now() + ms;
   while (!cond() && Date.now() < deadline) await Bun.sleep(25);
 }

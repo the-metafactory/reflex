@@ -19,34 +19,55 @@ export interface DaemonOptions {
   sweepIntervalMs?: number;
 }
 
-export interface ReflexDaemon {
+/** Opaque public handle (package-root contract): observe + stop. */
+export interface ReflexDaemonHandle {
+  scheduleStatus(): import("./sources/schedule").ScheduleStatus[];
+  stop(): Promise<void>;
+}
+
+/** Full internal daemon — repo-internal consumers (tests, R-106/R-107 handlers). */
+export interface ReflexDaemon extends ReflexDaemonHandle {
   pipeline: Pipeline;
   store: BlueprintStore;
   schedule: ScheduleSource;
   repo: Repository;
   bus: ReflexBus;
-  stop(): Promise<void>;
 }
 
 /**
  * Composition root: config → storage → blueprint surfaces → bus → stream →
- * pipeline → impulse sources → lifecycle timers. Fail-fast: any precondition
- * failure (creds, JetStream, migration, duplicate blueprint id) throws before
- * the daemon serves anything; the bin entry exits non-zero.
+ * pipeline → impulse sources → lifecycle timers. ASSEMBLY is fail-fast:
+ * any precondition failure during assembly (migration, duplicate blueprint
+ * id, creds, JetStream) throws — with already-opened resources closed —
+ * before the watcher or scheduler start. Failures AFTER start surface
+ * through their own paths (watcher last-good-set, bus outage queue).
  */
 export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}): Promise<ReflexDaemon> {
   const { db, close: closeDb } = openDb(options.dbPath ?? defaultDbPath());
+  let bus: ReflexBus | undefined;
+  try {
+    return await assemble();
+  } catch (error) {
+    // Startup-failure cleanup (sage R-105): never leak the DB handle or a
+    // connected bus to a caller that only sees the thrown error.
+    if (bus && !options.bus) await bus.close().catch(() => {});
+    closeDb();
+    throw error;
+  }
+
+  async function assemble(): Promise<ReflexDaemon> {
   const repo = new Repository(db);
 
   const sources = { watchRoots: cfg.watchRoots, activationsDir: cfg.activationsDir };
   const store = new BlueprintStore(await loadBlueprintSet(await discoverActivationFiles(sources)));
   const watcher = new ActivationWatcher(store, sources);
 
-  const bus = options.bus ?? createReflexBus(cfg);
+  bus = options.bus ?? createReflexBus(cfg);
   await ensureReflexStream(bus.raw, cfg);
 
   const pipeline = new Pipeline({ store, repo, bus });
   const schedule = new ScheduleSource(store, pipeline);
+  const busRef = bus;
 
   // Lifecycle wiring: hot-reload syncs scheduler jobs + expires waiting
   // decisions of removed blueprints (R-102 FR-6 / CONTEXT.md).
@@ -82,16 +103,18 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
     store,
     schedule,
     repo,
-    bus,
+    bus: busRef,
+    scheduleStatus: () => schedule.status(),
     async stop() {
       if (stopped) return;
       stopped = true;
       schedule.stop();
       await watcher.stop();
       clearInterval(sweepTimer);
-      await bus.close();
+      await busRef.close();
       closeDb();
       console.info("[reflex-daemon] stopped");
     },
   };
+  }
 }

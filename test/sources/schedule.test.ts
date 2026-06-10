@@ -130,7 +130,7 @@ describe("ScheduleSource", () => {
     const source = new ScheduleSource(store, sink());
     source.start();
     expect(source.status()).toEqual([
-      { blueprintId: "never", nextTick: null, lastTick: null, lastOutcome: null },
+      { blueprintId: "never", nextTick: null, lastTick: null, lastOutcome: null, skippedTicks: 0 },
     ]);
     source.stop();
   });

@@ -13,6 +13,7 @@ export interface ScheduleStatus {
   nextTick: string | null;
   lastTick: string | null;
   lastOutcome: string | null;
+  skippedTicks: number;
 }
 
 interface Job {
@@ -21,14 +22,21 @@ interface Job {
   signature: string;
   lastTick: string | null;
   lastOutcome: string | null;
+  /** True while an evaluation submitted by THIS job is unresolved. */
+  inFlight: boolean;
+  /** Ticks skipped because the previous evaluation was still in flight. */
+  skippedTicks: number;
 }
 
 /**
  * Internal Impulse source for schedule-kind blueprints (design §4): one
- * croner job per blueprint, tick → Impulse → pipeline. The scheduler ALWAYS
- * submits — concurrency/throttling belongs to the blueprint's Activation
- * Guards, never to the scheduler (spec FR-5). No backfill: missed ticks
- * while down are logged at start, never replayed (spec FR-4).
+ * croner job per blueprint, tick → Impulse → pipeline. Concurrency and
+ * throttling belong to the blueprint's Activation Guards, not the scheduler
+ * (spec FR-5) — with ONE bounded-resource exception: at most one unresolved
+ * evaluation per blueprint is in flight from the scheduler; ticks landing
+ * while the previous evaluation is unresolved are skipped and counted
+ * (status.skippedTicks). No backfill: missed ticks while down are logged at
+ * start, never replayed (spec FR-4).
  */
 export class ScheduleSource {
   private jobs = new Map<string, Job>();
@@ -82,6 +90,7 @@ export class ScheduleSource {
       nextTick: job.cron.nextRun()?.toISOString() ?? null,
       lastTick: job.lastTick,
       lastOutcome: job.lastOutcome,
+      skippedTicks: job.skippedTicks,
     }));
   }
 
@@ -90,10 +99,25 @@ export class ScheduleSource {
       throw new Error(`blueprint ${blueprint.id} is not schedule-kind`); // guarded by byKind
     }
     const { schedule, timezone } = blueprint.when;
-    const job: Job = { cron: null as never, signature: signatureOf(blueprint), lastTick: null, lastOutcome: null };
+    const job: Job = {
+      cron: null as never,
+      signature: signatureOf(blueprint),
+      lastTick: null,
+      lastOutcome: null,
+      inFlight: false,
+      skippedTicks: 0,
+    };
     job.cron = new Cron(schedule, { timezone, protect: false }, (self: Cron) => {
+      // Bounded in-flight (sage R-105): at most ONE unresolved evaluation per
+      // blueprint from the scheduler. A stalled pipeline/bus cannot accumulate
+      // unbounded evaluations; skips are counted and visible in status.
+      if (job.inFlight) {
+        job.skippedTicks += 1;
+        return;
+      }
       const scheduledFor = self.currentRun()?.toISOString() ?? new Date().toISOString();
       job.lastTick = scheduledFor;
+      job.inFlight = true;
       const impulse: Impulse = {
         kind: "schedule",
         blueprintId: blueprint.id,
@@ -111,6 +135,9 @@ export class ScheduleSource {
         .catch((error: Error) => {
           job.lastOutcome = "error";
           console.error(`[reflex-schedule] evaluate failed for ${blueprint.id}: ${error.message}`);
+        })
+        .finally(() => {
+          job.inFlight = false;
         });
     });
     return job;
