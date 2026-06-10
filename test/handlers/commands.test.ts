@@ -121,7 +121,7 @@ describe("pending + sweep", () => {
     nowRef.now = "2026-06-10T12:00:30.000Z";
     if (!(m1.ok && m1.data.decisionId)) throw new Error("setup");
 
-    const list = handlers.pending();
+    const list = handlers.listWaiting();
     expect(list.ok && list.data).toHaveLength(1);
     if (list.ok) {
       expect(list.data[0]!.blueprintId).toBe("gate");
@@ -133,7 +133,7 @@ describe("pending + sweep", () => {
     repo.sweepExpiredApprovals("2026-06-10T12:02:00.000Z");
     expect(repo.getApproval(m1.data.decisionId)!.state).toBe("expired");
     expect(repo.getApproval(m1.data.decisionId)!.reason).toBe("timeout");
-    const after = handlers.pending();
+    const after = handlers.listWaiting();
     expect(after.ok && after.data).toEqual([]);
     await close();
   });

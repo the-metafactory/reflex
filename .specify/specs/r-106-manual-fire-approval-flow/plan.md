@@ -49,7 +49,8 @@ Handlers hold references injected at daemon assembly: `{store, pipeline, repo}` 
 
 ```ts
 type HandlerResult<T> = { ok: true; data: T }
-  | { ok: false; error: { code: "not-found" | "conflict" | "invalid-input"; message: string; currentState?: string } };
+  | { ok: false; error: { code: "not-found" | "conflict" | "invalid-input" | "internal"; message: string; currentState?: string } };
+// "internal": storage/pipeline failures surfaced as typed results — R-107 must render it (exit 1).
 
 fire(blueprintId: string, input: Record<string, unknown>, actor: ReflexActor)
   → HandlerResult<{ decisionId?: string; outcome: "ignored"|"matched"|"blocked"|"fired"; reason?: string; correlationId?: string; expiresAt?: string }>
@@ -57,7 +58,7 @@ approve(decisionId: string, actor: ReflexActor)
   → HandlerResult<{ outcome: "fired"|"blocked"|"ignored"; decisionId?: string; reason?: string }>
 deny(decisionId: string, actor: ReflexActor)
   → HandlerResult<{ outcome: "denied"; decisionId: string }>
-pending()
+listWaiting()   // CLI verb `pending` maps here at the R-107 surface
   → HandlerResult<Array<{ decisionId: string; blueprintId: string; matchedAt: string; expiresAt: string; impulseSummary: string }>>
 ```
 

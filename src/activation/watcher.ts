@@ -27,6 +27,7 @@ export class ActivationWatcher {
   private watchers: FSWatcher[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   private rescanTimer: ReturnType<typeof setInterval> | null = null;
+  private reloading = false;
   private lastErrorMessage: string | null = null;
   private lastHash: string | null = null;
   private reloadCallbacks: Array<() => void> = [];
@@ -115,6 +116,18 @@ export class ActivationWatcher {
   }
 
   private async reload(): Promise<void> {
+    // Single-flight: debounce, rescan timer, and fs events all funnel here —
+    // a slow reload must coalesce, never stack (sage R-106 finding).
+    if (this.reloading) return;
+    this.reloading = true;
+    try {
+      await this.reloadInner();
+    } finally {
+      this.reloading = false;
+    }
+  }
+
+  private async reloadInner(): Promise<void> {
     // Phase 1 — everything that can REJECT the reload happens before swap;
     // the last-good-set guarantee covers exactly this phase.
     let next;

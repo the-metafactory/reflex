@@ -29,7 +29,9 @@ export interface ResolveData {
   reason?: string;
 }
 
-export interface PendingEntry {
+/** A Matched Decision awaiting approval (canonical core name — the friendly
+ * CLI verb `pending` exists only at the R-107 surface, per CONTEXT.md). */
+export interface WaitingApproval {
   decisionId: string;
   blueprintId: string;
   matchedAt: string;
@@ -108,14 +110,19 @@ export class CommandHandlers {
   async deny(decisionId: string, actor: ReflexActor): Promise<HandlerResult<ResolveData>> {
     try {
       const result = await this.pipeline.resolveMatched(decisionId, "deny", actor);
-      return ok({ outcome: "denied", decisionId: (result as { decisionId: string }).decisionId });
+      if (result.outcome === "denied") {
+        return ok({ outcome: "denied", decisionId: result.decisionId });
+      }
+      // resolveMatched(deny) only produces denied today — branch defensively
+      // so a future pipeline change can never masquerade as a denial.
+      return internal("deny", new Error(`unexpected resolution outcome "${result.outcome}"`));
     } catch (error) {
       return mapResolveError(decisionId, error as Error);
     }
   }
 
-  /** Matched Decisions awaiting approval — friendly CLI verb is `pending` (grill 19). */
-  pending(): HandlerResult<PendingEntry[]> {
+  /** Matched Decisions awaiting approval. R-107 maps its `pending` CLI verb here. */
+  listWaiting(): HandlerResult<WaitingApproval[]> {
     try {
       const waiting = this.repo.listWaiting();
       return ok(
@@ -128,7 +135,7 @@ export class CommandHandlers {
         })),
       );
     } catch (error) {
-      return internal("pending", error as Error);
+      return internal("list-waiting", error as Error);
     }
   }
 }
