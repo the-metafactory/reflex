@@ -79,7 +79,9 @@ export class HttpSource {
   }
 
   private async route(request: Request, url: URL): Promise<Response> {
-    const match = /^\/hook\/([a-z0-9][a-z0-9-]*)$/.exec(url.pathname);
+    // Canonical Impulse vocabulary on the public surface (CONTEXT.md:
+    // "hook" is an Avoid alias) — the route is /impulse/{blueprint-id}.
+    const match = /^\/impulse\/([a-z0-9][a-z0-9-]*)$/.exec(url.pathname);
     if (!match) return json(404, { error: "unknown path" });
     if (request.method !== "POST") return json(405, { error: "POST only" });
     const blueprintId = match[1]!;
@@ -119,8 +121,8 @@ export class HttpSource {
     }
     const declared = Number(request.headers.get("content-length") ?? 0);
     if (declared > MAX_BODY_BYTES) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
-    const raw = await request.text();
-    if (raw.length > MAX_BODY_BYTES) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
+    const raw = await readBounded(request, MAX_BODY_BYTES);
+    if (raw === null) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
     let payload: Record<string, unknown>;
     try {
       const parsed = JSON.parse(raw === "" ? "{}" : raw);
@@ -181,6 +183,29 @@ function constantTimeEquals(a: string, b: string): boolean {
   const bufB = Buffer.from(b);
   if (bufA.length !== bufB.length) return false;
   return timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Byte-counted streaming read with a hard cap: chunked or lengthless bodies
+ * abort the moment the running BYTE count (not UTF-16 chars) exceeds the
+ * limit — memory stays bounded by the cap, never by the request (sage R-109).
+ */
+async function readBounded(request: Request, maxBytes: number): Promise<string | null> {
+  const reader = request.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
 function json(status: number, body: Record<string, unknown>): Response {

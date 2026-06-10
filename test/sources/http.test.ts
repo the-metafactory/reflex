@@ -41,6 +41,7 @@ beforeAll(() => {
     httpBp("gated", { guards: { cooldownMs: 6 * 3_600_000 } }),
     httpBp("tight", { }),
     httpBp("bulk"),
+    httpBp("bytes"),
     httpBp("broken", { when: { http: { token_env: "DEFINITELY_UNSET_ENV" } } }),
   ]);
   const bus = createReflexBus(testConfig(), { transport: createTransport({ type: "memory" }) });
@@ -67,7 +68,7 @@ function call(path: string, init: RequestInit = {}, token: string | null = TOKEN
 
 describe("response-code matrix", () => {
   it("202 with pipeline verdict on valid call", async () => {
-    const r = await call("/hook/gh-ping", { body: '{"ref":"main"}' });
+    const r = await call("/impulse/gh-ping", { body: '{"ref":"main"}' });
     expect(r.status).toBe(202);
     const body = (await r.json()) as { outcome: string; decision_id: string };
     expect(body.outcome).toBe("fired");
@@ -78,37 +79,37 @@ describe("response-code matrix", () => {
   });
 
   it("401 without token; 401 with wrong token", async () => {
-    expect((await call("/hook/gh-ping", {}, null)).status).toBe(401);
-    expect((await call("/hook/gh-ping", {}, "wrong")).status).toBe(401);
+    expect((await call("/impulse/gh-ping", {}, null)).status).toBe(401);
+    expect((await call("/impulse/gh-ping", {}, "wrong")).status).toBe(401);
   });
 
   it("auth precedes existence: unknown id is 401 without a token — indistinguishable", async () => {
-    expect((await call("/hook/nope", {}, null)).status).toBe(401);
-    expect((await call("/hook/nope", {}, "anything")).status).toBe(401); // no token to validate against → still 401
+    expect((await call("/impulse/nope", {}, null)).status).toBe(401);
+    expect((await call("/impulse/nope", {}, "anything")).status).toBe(401); // no token to validate against → still 401
   });
 
   it("405 non-POST; 404 unknown path shape", async () => {
-    expect((await fetch(`${base}/hook/gh-ping`, { method: "GET", headers: { authorization: `Bearer ${TOKEN}` } })).status).toBe(405);
+    expect((await fetch(`${base}/impulse/gh-ping`, { method: "GET", headers: { authorization: `Bearer ${TOKEN}` } })).status).toBe(405);
     expect((await call("/other/route")).status).toBe(404);
   });
 
   it("415 wrong content type; 422 bad JSON; 413 oversize", async () => {
-    expect((await call("/hook/bulk", { headers: { "content-type": "text/plain" } })).status).toBe(415);
-    expect((await call("/hook/bulk", { body: "{nope" })).status).toBe(422);
+    expect((await call("/impulse/bulk", { headers: { "content-type": "text/plain" } })).status).toBe(415);
+    expect((await call("/impulse/bulk", { body: "{nope" })).status).toBe(422);
     // NOTE: rate limiting precedes content checks by design — use a fresh
     // bucket (dedicated blueprint) so the matrix tests don't starve it.
-    expect((await call("/hook/bulk", { body: JSON.stringify({ x: "y".repeat(300 * 1024) }) })).status).toBe(413);
+    expect((await call("/impulse/bulk", { body: JSON.stringify({ x: "y".repeat(300 * 1024) }) })).status).toBe(413);
   });
 
   it("503 for a route whose token_env is unset", async () => {
-    const r = await call("/hook/broken", {}, "anything");
+    const r = await call("/impulse/broken", {}, "anything");
     expect(r.status).toBe(503);
   });
 
   it("202 carries an honest blocked verdict (cooldown)", async () => {
-    const first = await call("/hook/gated");
+    const first = await call("/impulse/gated");
     expect(first.status).toBe(202);
-    const second = await call("/hook/gated", { body: '{"n":2}' });
+    const second = await call("/impulse/gated", { body: '{"n":2}' });
     expect(second.status).toBe(202);
     const body = (await second.json()) as { outcome: string; reason: string };
     expect(body.outcome).toBe("blocked");
@@ -118,7 +119,7 @@ describe("response-code matrix", () => {
   it("429 beyond the rate limit with Retry-After", async () => {
     let last: Response | null = null;
     for (let i = 0; i < 5; i++) {
-      last = await call("/hook/tight", { body: JSON.stringify({ i }) });
+      last = await call("/impulse/tight", { body: JSON.stringify({ i }) });
     }
     expect(last!.status).toBe(429);
     expect(Number(last!.headers.get("retry-after"))).toBeGreaterThan(0);
@@ -133,7 +134,7 @@ describe("token never logged", () => {
       lines.push(args.join(" "));
     };
     try {
-      await call("/hook/gh-ping", { body: '{"log":"check"}' });
+      await call("/impulse/gh-ping", { body: '{"log":"check"}' });
     } finally {
       console.info = original;
     }
@@ -147,5 +148,14 @@ describe("constant-time compare", () => {
     const text = await Bun.file(new URL("../../src/sources/http.ts", import.meta.url).pathname).text();
     expect(text).toContain("timingSafeEqual");
     expect(text).not.toMatch(/presented\s*===\s*expected/);
+  });
+});
+
+describe("byte-enforced body cap", () => {
+  it("multi-byte chars count as BYTES: a body under the char limit but over the byte limit is 413", async () => {
+    // 100k '€' chars = 300KB utf-8 — char count (100k) is under 256K, bytes are not.
+    const euros = "€".repeat(100 * 1024);
+    const r = await call("/impulse/bytes", { body: JSON.stringify({ x: euros }) });
+    expect(r.status).toBe(413);
   });
 });
