@@ -82,16 +82,18 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
     }
   });
 
+  await watcher.start();
+  schedule.start();
+
   // Approval expiry sweep: timeout'd Matched Decisions resolve to Expired.
-  // Runs once at startup (no immortal waiting rows after downtime), then on
-  // an interval. R-106 builds the full approval lifecycle on top.
+  // Runs once now (no immortal waiting rows after downtime), then on an
+  // interval. Created AFTER all fallible startup steps — a failed start must
+  // not leak a live timer (sage R-105 cycle-3). R-106 builds the full
+  // approval lifecycle on top.
   repo.sweepExpiredApprovals(new Date().toISOString());
   const sweepTimer = setInterval(() => {
     repo.sweepExpiredApprovals(new Date().toISOString());
   }, options.sweepIntervalMs ?? 30_000);
-
-  await watcher.start();
-  schedule.start();
   console.info(
     `[reflex-daemon] up — ${store.current().length} blueprint(s), ` +
       `${schedule.status().length} scheduled, principal ${cfg.principal}/${cfg.stack}`,
