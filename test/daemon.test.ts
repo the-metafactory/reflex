@@ -75,3 +75,26 @@ describe("startDaemon", () => {
     await bus.close();
   });
 });
+
+describe("http listener lifecycle", () => {
+  it("zero listeners without http blueprints; listener appears via hot-reload", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "reflex-daemon-"));
+    const central = join(dir, "activations");
+    mkdirSync(central);
+    writeFileSync(join(central, "a.yaml"), docFor("sched-only"));
+    const cfg = testConfig({ watchRoots: [], activationsDir: central });
+    const bus = createReflexBus(cfg, { transport: createTransport({ type: "memory" }) });
+    const daemon = await startDaemon(cfg, { dbPath: join(dir, "reflex.db"), bus, sweepIntervalMs: 100_000, httpPort: 0 });
+    expect(daemon.http.port()).toBeNull(); // no http blueprints → no listener
+
+    process.env.LIFECYCLE_TOKEN = "t";
+    writeFileSync(
+      join(central, "h.yaml"),
+      `schema: metafactory/activation/v1\nactivations:\n  - id: hooky\n    target: "@jc/hooky"\n    when:\n      http:\n        token_env: LIFECYCLE_TOKEN\n`,
+    );
+    const deadline = Date.now() + 10_000;
+    while (daemon.http.port() === null && Date.now() < deadline) await Bun.sleep(30);
+    expect(daemon.http.port()).not.toBeNull();
+    await daemon.stop();
+  });
+});
