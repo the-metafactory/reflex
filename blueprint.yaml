@@ -79,7 +79,7 @@ features:
 
   - id: R-110
     name: "Example activation blueprints"
-    status: planned
+    status: done
     iteration: 1
     depends: [R-105, R-106, R-108]
     description: "Three committed examples: F_PR_STATS daily schedule, Pilot 30-min scan (bus + approval), F_TESTING manual impulse. Serve as living docs and integration-test fixtures."
