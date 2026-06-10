@@ -44,7 +44,7 @@ features:
 
   - id: R-105
     name: "Schedule impulse source (cron)"
-    status: planned
+    status: done
     iteration: 1
     depends: [R-104]
     description: "Internal impulse source: cron expressions with timezone (croner). Drives schedule-kind blueprints."
