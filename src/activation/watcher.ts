@@ -9,7 +9,8 @@ export interface WatcherOptions {
   /**
    * Safety-net rescan cadence. macOS fs.watch can drop events around watcher
    * arming and under load; a periodic content-hash rescan catches anything
-   * missed. No-op suppression makes idle rescans cheap. Default 2000ms.
+   * missed. No-op suppression makes idle rescans cheap. Default 2000ms;
+   * `0` (or negative) disables the rescan entirely.
    */
   rescanIntervalMs?: number;
 }
@@ -68,9 +69,12 @@ export class ActivationWatcher {
     }
     // Safety net for dropped fs events (macOS arming race): periodic rescan;
     // content-hash no-op suppression keeps idle cost at one hash pass.
-    this.rescanTimer = setInterval(() => {
-      void this.reload();
-    }, this.rescanIntervalMs);
+    // <=0 disables — never a zero-delay busy loop (sage R-106 cycle-3).
+    if (this.rescanIntervalMs > 0) {
+      this.rescanTimer = setInterval(() => {
+        void this.reload();
+      }, this.rescanIntervalMs);
+    }
   }
 
   async stop(): Promise<void> {

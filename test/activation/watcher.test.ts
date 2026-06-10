@@ -79,3 +79,19 @@ describe("ActivationWatcher", () => {
     await watcher.stop();
   });
 });
+
+describe("rescan disable", () => {
+  it("rescanIntervalMs: 0 disables the safety net (no busy loop)", async () => {
+    const central = mkdtempSync(join(tmpdir(), "reflex-watch-"));
+    writeFileSync(join(central, "a.yaml"), docFor("aa"));
+    const opts = { watchRoots: [] as string[], activationsDir: central };
+    const store = new BlueprintStore(await loadBlueprintSet(await discoverActivationFiles(opts)));
+    const watcher = new ActivationWatcher(store, opts, { debounceMs: 50, rescanIntervalMs: 0 });
+    let reloads = 0;
+    watcher.onReload(() => { reloads += 1; });
+    await watcher.start();
+    await Bun.sleep(150); // a zero-delay interval would have fired many times
+    expect(reloads).toBe(0);
+    await watcher.stop();
+  });
+});

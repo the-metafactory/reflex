@@ -43,9 +43,9 @@ CommandHandlers ── fire ───► Pipeline.evaluate ──► Repository 
    └─ pending ───────► Repository.listWaiting (read-only join approvals×decisions)
 ```
 
-Handlers hold references injected at daemon assembly: `{store, pipeline, repo}` — no transport, no config. Underlying models are FROZEN contracts from merged features: `decisions`/`approvals`/`guard_state` schema (R-103 `src/store/schema.ts`, drizzle/0000 migration), `Impulse`/`EvaluateResult` (R-104 `src/pipeline/impulse.ts`). This plan adds NO schema or pipeline changes. Done = handlers + tests, PLUS two cross-cutting items that landed inside this feature's review cycles and are explicitly in its scope: (a) the watcher single-flight + periodic rescan safety net (fs.watch event-drop mitigation), (b) `handlers` exposed on the internal `ReflexDaemon` interface. The spec's FR-5 sweep/expiry FRs were delivered by R-103/R-105 and are re-verified here, not rebuilt.
+Handlers hold references injected at daemon assembly: `{store, pipeline, repo}` — no transport, no config. Underlying models are stable-as-of-this-commit contracts from merged features (coupling is COMPILE-TIME: R-107 imports these TypeScript types directly, so drift breaks its build — there is deliberately no runtime schema-version gate in a single-repo v0): `decisions`/`approvals`/`guard_state` schema (R-103 `src/store/schema.ts`, drizzle/0000 migration), `Impulse`/`EvaluateResult` (R-104 `src/pipeline/impulse.ts`). This plan adds NO schema or pipeline changes. Done = handlers + tests, PLUS two cross-cutting items that landed inside this feature's review cycles and are explicitly in its scope: (a) the watcher single-flight + periodic rescan safety net (fs.watch event-drop mitigation), (b) `handlers` exposed on the internal `ReflexDaemon` interface. The spec's FR-5 sweep/expiry FRs were delivered by R-103/R-105 and are re-verified here, not rebuilt.
 
-## Data Model (this feature's wire contracts — consumed verbatim by R-107)
+## Data Model (this feature's wire shapes — R-107 imports these types; compile-time coupling, no runtime gate)
 
 ```ts
 type HandlerResult<T> = { ok: true; data: T }
