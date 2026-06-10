@@ -6,6 +6,13 @@ import { parseActivationDocument } from "./schema";
 export interface WatcherOptions {
   /** Debounce window for filesystem event storms. Default 200ms. */
   debounceMs?: number;
+  /**
+   * Safety-net rescan cadence. macOS fs.watch can drop events around watcher
+   * arming and under load; a periodic content-hash rescan catches anything
+   * missed. No-op suppression makes idle rescans cheap. Default 2000ms;
+   * `0` (or negative) disables the rescan entirely.
+   */
+  rescanIntervalMs?: number;
 }
 
 /**
@@ -20,10 +27,14 @@ export interface WatcherOptions {
 export class ActivationWatcher {
   private watchers: FSWatcher[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private rescanTimer: ReturnType<typeof setInterval> | null = null;
+  private reloading = false;
   private lastErrorMessage: string | null = null;
   private lastHash: string | null = null;
   private reloadCallbacks: Array<() => void> = [];
   private readonly debounceMs: number;
+
+  private readonly rescanIntervalMs: number;
 
   constructor(
     private readonly store: BlueprintStore,
@@ -31,6 +42,7 @@ export class ActivationWatcher {
     options: WatcherOptions = {},
   ) {
     this.debounceMs = options.debounceMs ?? 200;
+    this.rescanIntervalMs = options.rescanIntervalMs ?? 2000;
   }
 
   onReload(callback: () => void): void {
@@ -55,11 +67,21 @@ export class ActivationWatcher {
         // Missing dir already warned by discovery; nothing to watch.
       }
     }
+    // Safety net for dropped fs events (macOS arming race): periodic rescan;
+    // content-hash no-op suppression keeps idle cost at one hash pass.
+    // <=0 disables — never a zero-delay busy loop (sage R-106 cycle-3).
+    if (this.rescanIntervalMs > 0) {
+      this.rescanTimer = setInterval(() => {
+        void this.reload();
+      }, this.rescanIntervalMs);
+    }
   }
 
   async stop(): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.rescanTimer) clearInterval(this.rescanTimer);
+    this.rescanTimer = null;
     for (const w of this.watchers) w.close();
     this.watchers = [];
   }
@@ -98,6 +120,18 @@ export class ActivationWatcher {
   }
 
   private async reload(): Promise<void> {
+    // Single-flight: debounce, rescan timer, and fs events all funnel here —
+    // a slow reload must coalesce, never stack (sage R-106 finding).
+    if (this.reloading) return;
+    this.reloading = true;
+    try {
+      await this.reloadInner();
+    } finally {
+      this.reloading = false;
+    }
+  }
+
+  private async reloadInner(): Promise<void> {
     // Phase 1 — everything that can REJECT the reload happens before swap;
     // the last-good-set guarantee covers exactly this phase.
     let next;

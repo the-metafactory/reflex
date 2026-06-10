@@ -4,6 +4,7 @@ import { BlueprintStore, loadBlueprintSet } from "./activation/store";
 import { createReflexBus, type ReflexBus } from "./bus";
 import { ensureReflexStream } from "./bus/stream";
 import type { ReflexConfig } from "./config/schema";
+import { CommandHandlers } from "./handlers/commands";
 import { Pipeline } from "./pipeline/evaluate";
 import { ScheduleSource } from "./sources/schedule";
 import { openDb } from "./store/db";
@@ -25,13 +26,14 @@ export interface ReflexDaemonHandle {
   stop(): Promise<void>;
 }
 
-/** Full internal daemon — repo-internal consumers (tests, R-106/R-107 handlers). */
+/** Full internal daemon — repo-internal consumers (tests, R-107 transport binding). */
 export interface ReflexDaemon extends ReflexDaemonHandle {
   pipeline: Pipeline;
   store: BlueprintStore;
   schedule: ScheduleSource;
   repo: Repository;
   bus: ReflexBus;
+  handlers: CommandHandlers;
 }
 
 /**
@@ -67,6 +69,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
 
   const pipeline = new Pipeline({ store, repo, bus });
   const schedule = new ScheduleSource(store, pipeline);
+  const handlers = new CommandHandlers(store, pipeline, repo);
   const busRef = bus;
 
   // Lifecycle wiring: hot-reload syncs scheduler jobs + expires waiting
@@ -106,6 +109,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
     schedule,
     repo,
     bus: busRef,
+    handlers,
     scheduleStatus: () => schedule.status(),
     async stop() {
       if (stopped) return;
