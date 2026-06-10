@@ -7,7 +7,7 @@ export const sovereigntySchema = z.object({
   data_residency: z.string().default("CH"),
   max_hop: z.number().int().min(0).default(0),
   frontier_ok: z.boolean().default(false),
-  model_class: z.string().default("any"),
+  model_class: z.enum(["local-only", "frontier", "any"]).default("any"),
 });
 
 export const configSchema = z.object({
