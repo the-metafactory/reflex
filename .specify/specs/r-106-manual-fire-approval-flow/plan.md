@@ -31,11 +31,37 @@ R-107 wires these to NATS request/reply; handlers never parse CLI args or touch 
 | NFR-2 | Sweep accuracy covered by interval=30s default + startup sweep (R-105) — asserted via fake-clock repo test |
 | NFR-3 | All tests offline (InMemory bus + :memory: DB) |
 
-## Data Model
+## Data Flow
+
+```
+operator (R-107 CLI, later Cortex)
+   │ transport (NOT this feature)
+   ▼
+CommandHandlers ── fire ───► Pipeline.evaluate ──► Repository (decisions/guards) ──► ReflexBus (envelopes)
+   │                 │
+   ├─ approve/deny ──► Pipeline.resolveMatched ──► Repository CAS (approvals) ──► fire path / denied row
+   └─ pending ───────► Repository.listWaiting (read-only join approvals×decisions)
+```
+
+Handlers hold references injected at daemon assembly: `{store, pipeline, repo}` — no transport, no config. Underlying models are FROZEN contracts from merged features: `decisions`/`approvals`/`guard_state` schema (R-103 `src/store/schema.ts`, drizzle/0000 migration), `Impulse`/`EvaluateResult` (R-104 `src/pipeline/impulse.ts`). This plan adds NO schema or pipeline changes — done = handlers + tests only (the spec's FR-5 sweep/expiry FRs were delivered by R-103/R-105 and are re-verified here, not rebuilt).
+
+## Data Model (this feature's wire contracts — consumed verbatim by R-107)
 
 ```ts
-type HandlerResult<T> = { ok: true; data: T } | { ok: false; error: { code: "not-found" | "conflict" | "invalid-input"; message: string; currentState?: string } };
+type HandlerResult<T> = { ok: true; data: T }
+  | { ok: false; error: { code: "not-found" | "conflict" | "invalid-input"; message: string; currentState?: string } };
+
+fire(blueprintId: string, input: Record<string, unknown>, actor: ReflexActor)
+  → HandlerResult<{ decisionId?: string; outcome: "ignored"|"matched"|"blocked"|"fired"; reason?: string; correlationId?: string; expiresAt?: string }>
+approve(decisionId: string, actor: ReflexActor)
+  → HandlerResult<{ outcome: "fired"|"blocked"|"ignored"; decisionId?: string; reason?: string }>
+deny(decisionId: string, actor: ReflexActor)
+  → HandlerResult<{ outcome: "denied"; decisionId: string }>
+pending()
+  → HandlerResult<Array<{ decisionId: string; blueprintId: string; matchedAt: string; expiresAt: string; impulseSummary: string }>>
 ```
+
+Stack: Bun 1.3.x, drizzle-orm 0.4x (locked in bun.lock), myelin pin f5ec865 — unchanged by this feature.
 
 ## Failure Modes & Blast Radius
 
@@ -46,6 +72,10 @@ type HandlerResult<T> = { ok: true; data: T } | { ok: false; error: { code: "not
 | approve races sweep | CAS (R-103) | one winner; loser conflict | none |
 | malformed input payload | handler boundary (object check) | invalid-input error before impulse | none |
 | blueprint removed while waiting | R-102→daemon hook | Expired(blueprint-removed) — daemon test exists (R-105) | one decision |
+| pipeline.evaluate throws (StorageError, disk full) | handler try/catch | typed `{error: {code: "storage"}}`-style internal error mapped to message; nothing fired (R-104 fail-closed proven) | one command |
+| DB locked/closed mid-command | StorageError propagation | same internal-error mapping; daemon health unaffected (next command independent) | one command |
+| Bus down during fire | R-101 outage queue | fire returns ok (decision row is truth); envelopes queue — handler result notes nothing, by design (wire catches up) | wire delay only |
+| Recovery-fails case (sweep raced + conflict storm) | R-103 sweep swallows ConflictError only | non-conflict errors propagate to daemon log; sweep retries next interval | bounded to one interval |
 
 ## Test Assertions (verifiability)
 

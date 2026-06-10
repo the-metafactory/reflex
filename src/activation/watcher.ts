@@ -6,6 +6,12 @@ import { parseActivationDocument } from "./schema";
 export interface WatcherOptions {
   /** Debounce window for filesystem event storms. Default 200ms. */
   debounceMs?: number;
+  /**
+   * Safety-net rescan cadence. macOS fs.watch can drop events around watcher
+   * arming and under load; a periodic content-hash rescan catches anything
+   * missed. No-op suppression makes idle rescans cheap. Default 2000ms.
+   */
+  rescanIntervalMs?: number;
 }
 
 /**
@@ -20,10 +26,13 @@ export interface WatcherOptions {
 export class ActivationWatcher {
   private watchers: FSWatcher[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private rescanTimer: ReturnType<typeof setInterval> | null = null;
   private lastErrorMessage: string | null = null;
   private lastHash: string | null = null;
   private reloadCallbacks: Array<() => void> = [];
   private readonly debounceMs: number;
+
+  private readonly rescanIntervalMs: number;
 
   constructor(
     private readonly store: BlueprintStore,
@@ -31,6 +40,7 @@ export class ActivationWatcher {
     options: WatcherOptions = {},
   ) {
     this.debounceMs = options.debounceMs ?? 200;
+    this.rescanIntervalMs = options.rescanIntervalMs ?? 2000;
   }
 
   onReload(callback: () => void): void {
@@ -55,11 +65,18 @@ export class ActivationWatcher {
         // Missing dir already warned by discovery; nothing to watch.
       }
     }
+    // Safety net for dropped fs events (macOS arming race): periodic rescan;
+    // content-hash no-op suppression keeps idle cost at one hash pass.
+    this.rescanTimer = setInterval(() => {
+      void this.reload();
+    }, this.rescanIntervalMs);
   }
 
   async stop(): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.rescanTimer) clearInterval(this.rescanTimer);
+    this.rescanTimer = null;
     for (const w of this.watchers) w.close();
     this.watchers = [];
   }
