@@ -115,3 +115,12 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ configPath: file })).toThrow(/Invalid REFLEX_PUBLISH_QUEUE_LIMIT: "abc"/);
   });
 });
+
+describe("nats.insecure", () => {
+  it("defaults false; env flag parses", () => {
+    const file = writeConfigFile("principal: jc\n");
+    expect(loadConfig({ configPath: file }).nats.insecure).toBe(false);
+    process.env.REFLEX_NATS_INSECURE = "1";
+    expect(loadConfig({ configPath: file }).nats.insecure).toBe(true);
+  });
+});

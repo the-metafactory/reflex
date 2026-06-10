@@ -75,6 +75,17 @@ class Counter {
  * without a readable creds file — do not wait for the first connect to
  * discover misconfig. */
 function buildNatsTransport(cfg: ReflexConfig): NATSTransport {
+  if (cfg.nats.insecure) {
+    // Explicit dev opt-out of the DD-72 creds fail-fast (matches current
+    // unauthenticated local-bus practice across the ecosystem). Loud.
+    console.warn("[reflex-bus] INSECURE: connecting to NATS without credentials (nats.insecure=true)");
+    return new NATSTransport({
+      servers: cfg.nats.url,
+      name: `reflex-${cfg.principal}`,
+      reconnect: true,
+      streamName: REFLEX_STREAM_NAME,
+    });
+  }
   if (!existsSync(cfg.nats.creds)) {
     throw new Error(
       `NATS credentials file not found: ${cfg.nats.creds} — provision per DD-72 ` +

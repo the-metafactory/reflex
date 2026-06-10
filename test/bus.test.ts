@@ -156,7 +156,7 @@ describe("ReflexBus", () => {
 
   it("fails fast on nats transport with missing creds file", () => {
     expect(() =>
-      createReflexBus(testConfig({ nats: { url: "nats://127.0.0.1:4222", creds: "/tmp/definitely-missing.creds" } })),
+      createReflexBus(testConfig({ nats: { url: "nats://127.0.0.1:4222", creds: "/tmp/definitely-missing.creds", insecure: false } })),
     ).toThrow(/definitely-missing\.creds/);
   });
 });

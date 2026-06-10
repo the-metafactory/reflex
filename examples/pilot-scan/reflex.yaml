@@ -1,0 +1,15 @@
+# Bus-kind Activation Blueprint with approval: when a review-flow task
+# completes on the bus, ask the operator before scanning.
+schema: metafactory/activation/v1
+activations:
+  - id: pilot-scan
+    target: "@jc/pilot-scan"
+    when:
+      bus:                                                     # External Impulse from the myelin bus
+        subject: "local.jc.default.tasks.review.completed"     # NATS subject to subscribe (wildcards allowed)
+        where: { flow: review }                                # flat field-equals on the envelope payload (v0)
+    policy: approval               # Matched Decisions wait for `reflex approve` / `reflex deny`
+    approval_timeout: 1h           # unanswered Matched Decisions resolve to Expired Decisions
+    guards:
+      run_lock: buffer             # a match during an in-flight run becomes the Buffered Impulse
+                                   # (depth 1, newest wins; re-presented when the run completes)
