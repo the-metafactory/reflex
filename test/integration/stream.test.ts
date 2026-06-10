@@ -2,10 +2,11 @@ import { describe, expect, it } from "bun:test";
 import { NATSTransport } from "@the-metafactory/myelin";
 import { ensureReflexStream, REFLEX_STREAM_NAME, reflexStreamSubjects } from "../../src/bus/stream";
 import { testConfig } from "../helpers";
-import { NATS_URL, natsReachable, skipNotice } from "./_guard";
+import { NATS_URL, natsReachable, requireWhenExplicit, skipNotice } from "./_guard";
 
 const up = await natsReachable();
 if (!up) skipNotice("stream");
+requireWhenExplicit(up, "stream");
 
 const cfg = testConfig({ principal: "jc", stack: "itest" });
 

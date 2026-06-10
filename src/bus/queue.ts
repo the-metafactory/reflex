@@ -1,8 +1,13 @@
 /**
- * Bounded FIFO ring buffer for publishes that fail while the transport is
+ * Bounded FIFO buffer for publishes that fail while the transport is
  * disconnected (spec FR-8). Overflow drops the OLDEST item — activation is
  * time-sensitive; the newest signal wins. Dropping is loud at the call site
  * (caller logs + counts); the SQLite decision rows remain the audit truth.
+ *
+ * Head-index design (sage R-101 review): drops and flushes advance a head
+ * pointer instead of Array.shift(), so per-item work stays O(1) under the
+ * exact failure mode this queue absorbs; the backing array compacts once
+ * per flush, not once per item.
  */
 export interface FlushResult {
   flushed: number;
@@ -10,6 +15,7 @@ export interface FlushResult {
 
 export class BoundedPublishQueue<T> {
   private items: T[] = [];
+  private head = 0;
   private dropped = 0;
   private flushing = false;
 
@@ -18,7 +24,7 @@ export class BoundedPublishQueue<T> {
   }
 
   get size(): number {
-    return this.items.length;
+    return this.items.length - this.head;
   }
 
   get droppedCount(): number {
@@ -28,15 +34,18 @@ export class BoundedPublishQueue<T> {
   /** Returns the dropped item when the buffer overflowed, else null. */
   enqueue(item: T): T | null {
     this.items.push(item);
-    if (this.items.length > this.limit) {
+    let droppedItem: T | null = null;
+    if (this.size > this.limit) {
+      droppedItem = this.items[this.head] ?? null;
+      this.head += 1;
       this.dropped += 1;
-      return this.items.shift() ?? null;
     }
-    return null;
+    this.compactIfWorthwhile();
+    return droppedItem;
   }
 
   peekAll(): readonly T[] {
-    return this.items;
+    return this.items.slice(this.head);
   }
 
   /**
@@ -49,19 +58,34 @@ export class BoundedPublishQueue<T> {
     this.flushing = true;
     let flushed = 0;
     try {
-      while (this.items.length > 0) {
-        const head = this.items[0] as T;
+      while (this.head < this.items.length) {
+        const next = this.items[this.head] as T;
         try {
-          await publish(head);
+          await publish(next);
         } catch {
           break;
         }
-        this.items.shift();
+        this.head += 1;
         flushed += 1;
       }
     } finally {
+      this.compact();
       this.flushing = false;
     }
     return { flushed };
+  }
+
+  /** Reclaim consumed slots once per flush (and on large drop runs). */
+  private compact(): void {
+    if (this.head > 0) {
+      this.items = this.items.slice(this.head);
+      this.head = 0;
+    }
+  }
+
+  private compactIfWorthwhile(): void {
+    if (this.head > this.limit) {
+      this.compact();
+    }
   }
 }

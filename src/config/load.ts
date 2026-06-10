@@ -29,7 +29,17 @@ const ENV_MAP: Array<{ env: string; path: string[]; parse?: (raw: string) => unk
   { env: "REFLEX_STACK", path: ["stack"] },
   { env: "REFLEX_NATS_URL", path: ["nats", "url"] },
   { env: "REFLEX_NATS_CREDS", path: ["nats", "creds"] },
-  { env: "REFLEX_PUBLISH_QUEUE_LIMIT", path: ["publish_queue_limit"], parse: (raw) => Number(raw) },
+  {
+    env: "REFLEX_PUBLISH_QUEUE_LIMIT",
+    path: ["publish_queue_limit"],
+    parse: (raw) => {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) {
+        throw new Error(`Invalid REFLEX_PUBLISH_QUEUE_LIMIT: "${raw}" — expected a number`);
+      }
+      return n;
+    },
+  },
 ];
 
 /**

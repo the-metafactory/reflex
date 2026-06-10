@@ -23,4 +23,5 @@ export {
   type ReflexActor,
 } from "./bus/envelopes";
 export { ensureReflexStream, REFLEX_STREAM_NAME, reflexStreamSubjects } from "./bus/stream";
-export { BoundedPublishQueue } from "./bus/queue";
+// BoundedPublishQueue stays module-private (sage R-101 review): callers need
+// createReflexBus + metrics, not the outage-buffer implementation.

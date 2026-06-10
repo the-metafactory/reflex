@@ -71,46 +71,58 @@ class Counter {
   }
 }
 
-export function createReflexBus(cfg: ReflexConfig, options: ReflexBusOptions = {}): ReflexBus {
-  let transport = options.transport;
-  if (!transport) {
-    // Fail-fast policy (spec FR-7): refuse to construct without a readable
-    // creds file — do not wait for the first connect to discover misconfig.
-    if (!existsSync(cfg.nats.creds)) {
-      throw new Error(
-        `NATS credentials file not found: ${cfg.nats.creds} — provision per DD-72 ` +
-          `(per-component creds under ~/.config/nats/creds/) or set REFLEX_NATS_CREDS`,
-      );
-    }
-    transport = new NATSTransport({
-      servers: cfg.nats.url,
-      name: `reflex-${cfg.principal}`,
-      credentials: cfg.nats.creds,
-      requireAuth: true,
-      reconnect: true,
-      streamName: REFLEX_STREAM_NAME,
-    });
+/** Fail-fast NATS transport construction (spec FR-7): refuse to construct
+ * without a readable creds file — do not wait for the first connect to
+ * discover misconfig. */
+function buildNatsTransport(cfg: ReflexConfig): NATSTransport {
+  if (!existsSync(cfg.nats.creds)) {
+    throw new Error(
+      `NATS credentials file not found: ${cfg.nats.creds} — provision per DD-72 ` +
+        `(per-component creds under ~/.config/nats/creds/) or set REFLEX_NATS_CREDS`,
+    );
   }
+  return new NATSTransport({
+    servers: cfg.nats.url,
+    name: `reflex-${cfg.principal}`,
+    credentials: cfg.nats.creds,
+    requireAuth: true,
+    reconnect: true,
+    streamName: REFLEX_STREAM_NAME,
+  });
+}
 
-  const published = new Counter();
-  const receivedCounter = new Counter();
-  let handlerErrors = 0;
-  let lastPublishAt: string | null = null;
-
-  const metrics = metricsMiddleware({ publishedTotal: published, receivedTotal: receivedCounter });
+/** Metered transport + envelope layer over the raw transport. */
+function buildEnvelopeLayer(
+  cfg: ReflexConfig,
+  transport: TransportPublisher & TransportSubscriber,
+  published: Counter,
+  received: Counter,
+): { metered: ReturnType<typeof createMiddlewareTransport>; envelopeTransport: EnvelopeTransport } {
+  const metrics = metricsMiddleware({ publishedTotal: published, receivedTotal: received });
   const metered = createMiddlewareTransport({
     publisher: transport,
     subscriber: transport,
     publishMiddleware: [metrics.publish],
     subscribeMiddleware: [metrics.subscribe],
   });
-
   const envelopeTransport = new EnvelopeTransport({
     publisher: metered,
     subscriber: metered,
     networkSovereignty: cfg.sovereignty,
     stack: cfg.stack,
   });
+  return { metered, envelopeTransport };
+}
+
+export function createReflexBus(cfg: ReflexConfig, options: ReflexBusOptions = {}): ReflexBus {
+  const transport = options.transport ?? buildNatsTransport(cfg);
+
+  const published = new Counter();
+  const receivedCounter = new Counter();
+  let handlerErrors = 0;
+  let lastPublishAt: string | null = null;
+
+  const { metered, envelopeTransport } = buildEnvelopeLayer(cfg, transport, published, receivedCounter);
 
   function containHandler(
     subject: string,
