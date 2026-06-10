@@ -56,5 +56,11 @@ export {
 export { Pipeline, type PipelineOptions } from "./pipeline/evaluate";
 export type { EvaluateResult, GuardReason, Impulse } from "./pipeline/impulse";
 export type { DryRunVerdict } from "./pipeline/verdict";
+// Daemon surface is deliberately opaque at the package root (sage R-105):
+// stop + schedule status only. Internal composition (pipeline/store/repo/bus,
+// ScheduleSource) is reachable via module imports inside this repo, not API.
+export { startDaemon } from "./daemon";
+export type { ReflexDaemonHandle } from "./daemon";
+export type { ScheduleStatus } from "./sources/schedule";
 // BoundedPublishQueue stays module-private (sage R-101 review): callers need
 // createReflexBus + metrics, not the outage-buffer implementation.
