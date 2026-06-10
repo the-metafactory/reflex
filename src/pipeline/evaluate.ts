@@ -132,7 +132,10 @@ export class Pipeline {
     // 3. record the event row (history + buffer matching)
     this.repo.recordFiredEvent({
       decisionId: decision.id,
-      envelopeId: correlationId, // envelope id assigned by myelin; correlation is our join key
+      // Honest null: myelin assigns the envelope id inside the transport and
+      // does not expose it to publishers; correlation_id is the join key.
+      // Populate when the bus surfaces envelope identity (future enhancement).
+      envelopeId: null,
       correlationId,
       subject: "derived-by-bus",
       publishedAt: now,
@@ -174,11 +177,11 @@ export class Pipeline {
     action: "approve" | "deny",
     actor: ReflexActor,
   ): Promise<EvaluateResult | { outcome: "denied"; decisionId: string }> {
-    const now = this.nowFn();
     const matched = this.repo.getDecision(decisionId);
     if (!matched) throw new Error(`Decision ${decisionId} not found`);
 
     if (action === "deny") {
+      const now = this.nowFn();
       const resolution = this.repo.resolveMatched(decisionId, {
         kind: "deny",
         resolutionOutcome: "denied",
@@ -196,6 +199,10 @@ export class Pipeline {
     }
 
     return this.serialized(matched.blueprintId, async () => {
+      // Clock read INSIDE the serialized callback: an approve queued behind
+      // same-blueprint work must use the instant it actually runs, not the
+      // instant it was enqueued (sage R-104 cycle-3 finding).
+      const now = this.nowFn();
       const blueprint = this.store.get(matched.blueprintId);
       if (!blueprint) {
         this.repo.resolveMatched(decisionId, {

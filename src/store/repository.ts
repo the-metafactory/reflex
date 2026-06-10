@@ -356,7 +356,7 @@ export class Repository {
 
   recordFiredEvent(input: {
     decisionId: string;
-    envelopeId: string;
+    envelopeId: string | null;
     correlationId: string;
     subject: string;
     publishedAt: string;
