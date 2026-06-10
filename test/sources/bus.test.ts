@@ -184,3 +184,14 @@ describe("hot-reload sync", () => {
     await r.close();
   });
 });
+
+describe("stop vs queued sync race", () => {
+  it("a sync queued before stop cannot resubscribe after teardown", async () => {
+    const r = await rig([busBp("racer")]);
+    const queued = r.source.sync(); // queued behind nothing, but unawaited
+    await r.source.stop();
+    await queued;
+    expect(r.source.active()).toEqual([]);
+    await r.bus.close();
+  });
+});

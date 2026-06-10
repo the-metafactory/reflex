@@ -36,6 +36,7 @@ export class BusSource {
    * a check-then-await race could double-subscribe and leak the first
    * unsubscribe handle (sage R-108 cycle-2 finding). */
   private syncChain: Promise<void> = Promise.resolve();
+  private stopped = false;
   /** The daemon's own fired-subject prefix — blueprints must not subscribe to it (cycle guard). */
   private readonly ownFiredSubject: string;
 
@@ -60,6 +61,11 @@ export class BusSource {
   }
 
   async stop(): Promise<void> {
+    // Stop gates the sync chain: any already-queued reload sync becomes a
+    // no-op, and we wait for in-flight syncs so no subscription can be
+    // created after teardown (sage R-108 cycle-3 finding).
+    this.stopped = true;
+    await this.syncChain;
     if (this.flushTimer) clearInterval(this.flushTimer);
     this.flushTimer = null;
     this.flushIgnored();
@@ -80,6 +86,7 @@ export class BusSource {
   }
 
   private async syncInner(): Promise<void> {
+    if (this.stopped) return;
     const blueprints = new Map(
       this.store
         .byKind("bus")
