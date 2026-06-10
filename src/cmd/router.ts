@@ -143,7 +143,7 @@ export class CommandRouter {
           })),
         };
       }
-      case "test": {
+      case "dry-run": {
         const blueprintId = String(args.blueprintId ?? "");
         const blueprint = store.get(blueprintId);
         if (!blueprint) {

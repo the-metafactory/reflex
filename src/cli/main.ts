@@ -195,7 +195,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
         return;
       }
       await remote(
-        "test",
+        "dry-run",
         (data) => {
           const d = data as { wouldOutcome: string; reasons: string[] };
           return `DRY RUN — would ${d.wouldOutcome}: ${d.reasons.join("; ")}`;

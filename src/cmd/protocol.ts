@@ -5,7 +5,7 @@ export const PROTOCOL_VERSION = 1;
 
 // Wire command names are CANONICAL (CONTEXT.md): the friendly CLI verb
 // `pending` maps to `matched` before it ever reaches protocol or subjects.
-export const COMMANDS = ["status", "list", "fire", "approve", "deny", "matched", "history", "test"] as const;
+export const COMMANDS = ["status", "list", "fire", "approve", "deny", "matched", "history", "dry-run"] as const;
 export type Command = (typeof COMMANDS)[number];
 
 export interface CmdRequest {
