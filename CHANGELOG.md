@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **R-106 Manual fire + approval flow**: **Core Problem:** Two human-facing halves of the pipeline are missing: (1) producing a `manual`-kind Impulse from an operator command (`reflex fire`) that goes through the FULL pipeline — no bypass...
 - **R-105 Schedule impulse source (cron)**: **Core Problem:** Schedule-kind blueprints (`when: { schedule: "0 7 * * *", time
 - **R-105 Schedule impulse source (cron)**: **Core Problem:** Schedule-kind blueprints (`when: { schedule: "0 7 * * *", time
 - **R-104 Decision pipeline core**: **Core Problem:** The heart of Reflex does not exist: take an Impulse, evaluate matching Activation Blueprints, walk the pipeline (Decision → Policy → Approval gate → Guards → Activation Event), re...

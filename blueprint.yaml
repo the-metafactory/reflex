@@ -51,7 +51,7 @@ features:
 
   - id: R-106
     name: "Manual fire + approval flow"
-    status: planned
+    status: done
     iteration: 1
     depends: [R-104]
     description: "reflex fire <blueprint-id> --input json as programmatic impulse. Approval lifecycle: matched decisions wait, reflex approve/deny <decision-id>, per-blueprint approval_timeout (default 1h) resolves to an Expired Decision; deny produces a Denied Decision."
