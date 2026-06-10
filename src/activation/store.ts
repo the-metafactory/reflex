@@ -6,19 +6,27 @@ export class DuplicateIdError extends Error {
   readonly id: string;
   constructor(id: string, firstFile: string, secondFile: string) {
     super(
-      `Duplicate Activation Blueprint id "${id}" — defined in both ${firstFile} and ${secondFile}. ` +
-        `Blueprint ids are global across all config surfaces; rename one.`,
+      firstFile === secondFile
+        ? `Duplicate Activation Blueprint id "${id}" — defined twice in ${firstFile}. Rename one entry.`
+        : `Duplicate Activation Blueprint id "${id}" — defined in both ${firstFile} and ${secondFile}. ` +
+          `Blueprint ids are global across all config surfaces; rename one.`,
     );
     this.name = "DuplicateIdError";
     this.id = id;
   }
 }
 
-/** Recursively freeze a blueprint so a snapshot really is immutable. */
-function deepFreeze<T>(value: T): T {
+/**
+ * Recursively freeze a blueprint so a snapshot really is immutable. Tracks
+ * visited objects — YAML anchor cycles in payload must not stack-overflow
+ * the load path (sage R-102 cycle-3 security finding).
+ */
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
   if (value !== null && typeof value === "object") {
+    if (seen.has(value as object)) return value;
+    seen.add(value as object);
     for (const key of Object.keys(value as Record<string, unknown>)) {
-      deepFreeze((value as Record<string, unknown>)[key]);
+      deepFreeze((value as Record<string, unknown>)[key], seen);
     }
     Object.freeze(value);
   }
@@ -71,7 +79,7 @@ export class BlueprintStore {
   private removedCallbacks: Array<(ids: string[]) => void> = [];
 
   constructor(initial: ActivationBlueprint[]) {
-    this.set = deepFreeze(Object.freeze([...initial.map(deepFreeze)]));
+    this.set = deepFreeze(Object.freeze([...initial.map((b) => deepFreeze(b))]));
   }
 
   current(): readonly ActivationBlueprint[] {
@@ -93,7 +101,7 @@ export class BlueprintStore {
   swap(next: ActivationBlueprint[]): void {
     const nextIds = new Set(next.map((b) => b.id));
     const removed = this.set.filter((b) => !nextIds.has(b.id)).map((b) => b.id);
-    this.set = Object.freeze([...next.map(deepFreeze)]);
+    this.set = Object.freeze([...next.map((b) => deepFreeze(b))]);
     if (removed.length > 0) {
       for (const cb of this.removedCallbacks) {
         try {

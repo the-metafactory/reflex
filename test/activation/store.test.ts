@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BlueprintStore, DuplicateIdError, loadBlueprintSet } from "../../src/activation/store";
+import { BlueprintStore, DuplicateIdError, loadBlueprintSet, mergeBlueprints } from "../../src/activation/store";
 
 function fileWith(id: string, dir?: string): string {
   const d = dir ?? mkdtempSync(join(tmpdir(), "reflex-store-"));
@@ -63,5 +63,43 @@ describe("BlueprintStore", () => {
     const store = new BlueprintStore(await loadBlueprintSet([fileWith("aa")]));
     expect(store.get("aa")?.target).toBe("@jc/aa");
     expect(store.get("zz")).toBeUndefined();
+  });
+});
+
+describe("deepFreeze cycle safety", () => {
+  it("survives YAML anchor cycles in payload without stack overflow", async () => {
+    const cyclic: Record<string, unknown> = { a: 1 };
+    cyclic.self = cyclic;
+    const bp = {
+      id: "cyclic",
+      target: "@jc/c",
+      kind: "manual" as const,
+      when: { manual: {} as Record<string, never> },
+      policy: "auto" as const,
+      approvalTimeoutMs: 3_600_000,
+      guards: {},
+      payload: cyclic,
+      sourceFile: "/tmp/c.yaml",
+    };
+    const store = new BlueprintStore([bp]);
+    expect(store.get("cyclic")).toBeDefined();
+    expect(Object.isFrozen(store.get("cyclic")!.payload)).toBe(true);
+  });
+});
+
+describe("same-file duplicate message", () => {
+  it("names the file once with a defined-twice message", () => {
+    const bp = (id: string) => ({
+      id,
+      target: "@jc/x",
+      kind: "manual" as const,
+      when: { manual: {} as Record<string, never> },
+      policy: "auto" as const,
+      approvalTimeoutMs: 3_600_000,
+      guards: {},
+      payload: {},
+      sourceFile: "/tmp/same.yaml",
+    });
+    expect(() => mergeBlueprints([[bp("dup"), bp("dup")]])).toThrow(/defined twice in \/tmp\/same\.yaml/);
   });
 });

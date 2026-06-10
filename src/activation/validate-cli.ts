@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parseActivationDocument } from "./schema";
-import { DuplicateIdError } from "./store";
+import { DuplicateIdError, mergeBlueprints } from "./store";
 import type { ActivationBlueprint } from "./types";
 
 export interface ValidationResult {
@@ -40,28 +40,21 @@ export async function validatePaths(paths: string[]): Promise<ValidationResult> 
   }
 
   const errors: ValidationResult["errors"] = [];
-  const byId = new Map<string, ActivationBlueprint>();
+  // The SAME merge the daemon loader uses (mergeBlueprints) runs here —
+  // applied incrementally per file so errors attribute to the offending
+  // file. A failed file contributes nothing; a contested id is purged
+  // (sage R-102 cycle-2/3 findings).
+  let merged: ActivationBlueprint[] = [];
   for (const file of [...fileSet].sort()) {
     try {
       const parsed = parseActivationDocument(await Bun.file(file).text(), file);
-      // Stage the whole file first; merge only if it is clean end-to-end.
-      const staged = new Map<string, ActivationBlueprint>();
-      for (const blueprint of parsed) {
-        const existing = byId.get(blueprint.id) ?? staged.get(blueprint.id);
-        if (existing) {
-          throw new DuplicateIdError(blueprint.id, existing.sourceFile, blueprint.sourceFile);
-        }
-        staged.set(blueprint.id, blueprint);
-      }
-      for (const [id, blueprint] of staged) byId.set(id, blueprint);
+      merged = mergeBlueprints([merged, parsed]);
     } catch (error) {
-      // A contested id is poisoned: the earlier copy must not surface as a
-      // clean blueprint from an invalid corpus (sage R-102 cycle-2 finding).
       if (error instanceof DuplicateIdError) {
-        byId.delete(error.id);
+        merged = merged.filter((b) => b.id !== error.id);
       }
       errors.push({ file, message: (error as Error).message });
     }
   }
-  return { ok: errors.length === 0, blueprints: [...byId.values()], errors };
+  return { ok: errors.length === 0, blueprints: merged, errors };
 }
