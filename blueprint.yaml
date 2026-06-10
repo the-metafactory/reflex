@@ -37,7 +37,7 @@ features:
 
   - id: R-104
     name: "Decision pipeline core"
-    status: planned
+    status: done
     iteration: 1
     depends: [R-102, R-103]
     description: "Impulse -> rule evaluation -> Activation Decision (ignored/matched/blocked/fired/denied/expired) -> policy (auto/approval/disabled) -> guards (cooldown, run lock with skip|buffer conflict modes, idempotency key) -> Activation Event publish to mf.{net}.reflex.activation.fired.{target}. Decision audit events on mf.{net}.reflex.activation.decision.{outcome}. Dry Run produces a Dry Run Verdict: no guard mutation, no events, not in decision history."
