@@ -18,7 +18,13 @@ async function main(): Promise<void> {
   }
   const shutdown = (signal: string) => {
     console.info(`[reflex-daemon] ${signal} — shutting down`);
-    void daemon.stop().then(() => process.exit(0));
+    daemon
+      .stop()
+      .then(() => process.exit(0))
+      .catch((error: Error) => {
+        console.error(`[reflex-daemon] shutdown cleanup failed: ${error.message}`);
+        process.exit(1);
+      });
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
