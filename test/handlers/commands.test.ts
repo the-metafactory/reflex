@@ -150,3 +150,47 @@ describe("performance", () => {
     await close();
   });
 });
+
+describe("bus outage during fire", () => {
+  it("fire returns ok (decision row is truth); envelopes ride the outage queue", async () => {
+    const failing = {
+      publish: () => Promise.reject(new Error("down")),
+      request: () => Promise.reject(new Error("down")),
+      subscribe: () => Promise.resolve({ unsubscribe: async () => {} }),
+      subscribeBestEffort: () => Promise.resolve({ unsubscribe: async () => {} }),
+      close: async () => {},
+    };
+    const { db, close } = openDb(":memory:");
+    const repo = new Repository(db);
+    const store = new BlueprintStore([bp()]);
+    const bus = createReflexBus(testConfig(), { transport: failing as never, flushIntervalMs: 100_000 });
+    const pipeline = new Pipeline({ store, repo, bus, nowFn: () => "2026-06-10T12:00:00.000Z" });
+    const handlers = new CommandHandlers(store, pipeline, repo);
+
+    const result = await handlers.fire("f-testing", { x: 1 }, OPERATOR);
+    expect(result.ok && result.data.outcome).toBe("fired");
+    expect(repo.historyFor({ blueprintId: "f-testing" })).toHaveLength(1);
+    expect(bus.metrics().queued).toBe(2); // fired + decision audit envelopes held
+    await bus.close();
+    close();
+  });
+});
+
+describe("internal errors stay server-side", () => {
+  it("storage failure maps to a generic message without raw detail", async () => {
+    const { handlers, repo, close } = rig([bp()]);
+    // Force a storage failure: close the DB out from under the pipeline.
+    (repo as never as { db: { run: () => never } }).db = {
+      run: () => {
+        throw new Error("SQLITE_IOERR at secret-internal-path/reflex.db");
+      },
+    } as never;
+    const broken = await handlers.listWaiting();
+    expect(!broken.ok && broken.error.code).toBe("internal");
+    if (!broken.ok) {
+      expect(broken.error.message).not.toContain("secret-internal-path");
+      expect(broken.error.message).toContain("daemon log");
+    }
+    await close();
+  });
+});

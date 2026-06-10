@@ -43,7 +43,7 @@ CommandHandlers ── fire ───► Pipeline.evaluate ──► Repository 
    └─ pending ───────► Repository.listWaiting (read-only join approvals×decisions)
 ```
 
-Handlers hold references injected at daemon assembly: `{store, pipeline, repo}` — no transport, no config. Underlying models are FROZEN contracts from merged features: `decisions`/`approvals`/`guard_state` schema (R-103 `src/store/schema.ts`, drizzle/0000 migration), `Impulse`/`EvaluateResult` (R-104 `src/pipeline/impulse.ts`). This plan adds NO schema or pipeline changes — done = handlers + tests only (the spec's FR-5 sweep/expiry FRs were delivered by R-103/R-105 and are re-verified here, not rebuilt).
+Handlers hold references injected at daemon assembly: `{store, pipeline, repo}` — no transport, no config. Underlying models are FROZEN contracts from merged features: `decisions`/`approvals`/`guard_state` schema (R-103 `src/store/schema.ts`, drizzle/0000 migration), `Impulse`/`EvaluateResult` (R-104 `src/pipeline/impulse.ts`). This plan adds NO schema or pipeline changes. Done = handlers + tests, PLUS two cross-cutting items that landed inside this feature's review cycles and are explicitly in its scope: (a) the watcher single-flight + periodic rescan safety net (fs.watch event-drop mitigation), (b) `handlers` exposed on the internal `ReflexDaemon` interface. The spec's FR-5 sweep/expiry FRs were delivered by R-103/R-105 and are re-verified here, not rebuilt.
 
 ## Data Model (this feature's wire contracts — consumed verbatim by R-107)
 
@@ -75,7 +75,7 @@ Stack: Bun 1.3.x, drizzle-orm 0.4x (locked in bun.lock), myelin pin f5ec865 — 
 | blueprint removed while waiting | R-102→daemon hook | Expired(blueprint-removed) — daemon test exists (R-105) | one decision |
 | pipeline.evaluate throws (StorageError, disk full) | handler try/catch | typed `{error: {code: "storage"}}`-style internal error mapped to message; nothing fired (R-104 fail-closed proven) | one command |
 | DB locked/closed mid-command | StorageError propagation | same internal-error mapping; daemon health unaffected (next command independent) | one command |
-| Bus down during fire | R-101 outage queue | fire returns ok (decision row is truth); envelopes queue — handler result notes nothing, by design (wire catches up) | wire delay only |
+| Bus down during fire | R-101 outage queue | fire returns ok (decision row is truth); envelopes queue — TESTED at handler level (failing transport → ok + metrics.queued=2) | wire delay only |
 | Recovery-fails case (sweep raced + conflict storm) | R-103 sweep swallows ConflictError only | non-conflict errors propagate to daemon log; sweep retries next interval | bounded to one interval |
 
 ## Test Assertions (verifiability)

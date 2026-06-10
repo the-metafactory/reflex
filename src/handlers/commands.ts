@@ -149,7 +149,14 @@ function invalid<T>(message: string): HandlerResult<T> {
 }
 
 function internal<T>(operation: string, error: Error): HandlerResult<T> {
-  return { ok: false, error: { code: "internal", message: `${operation} failed: ${error.message}` } };
+  // The raw error stays server-side: storage/pipeline failure detail (paths,
+  // SQL, config values) must not cross the command boundary to transports
+  // (sage R-106 security finding). Operators correlate via the daemon log.
+  console.error(`[reflex-handlers] ${operation} failed: ${error.message}`);
+  return {
+    ok: false,
+    error: { code: "internal", message: `${operation} failed — see reflex daemon log for detail` },
+  };
 }
 
 function mapResolveError<T>(decisionId: string, error: Error): HandlerResult<T> {
