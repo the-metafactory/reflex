@@ -30,7 +30,7 @@ features:
 
   - id: R-103
     name: "SQLite storage (Drizzle)"
-    status: planned
+    status: done
     iteration: 1
     depends: []
     description: "Tables: decisions, approvals, guard_state, fired_events at ~/.local/state/reflex/reflex.db. Ignored decisions stored as per-blueprint counters, not rows."
