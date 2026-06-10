@@ -32,6 +32,10 @@ export class BusSource {
    * the hot bus callback never does a synchronous DB write per envelope. */
   private ignoredBuffer = new Map<string, number>();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
+  /** sync() is single-flight: overlapping reloads queue, never interleave —
+   * a check-then-await race could double-subscribe and leak the first
+   * unsubscribe handle (sage R-108 cycle-2 finding). */
+  private syncChain: Promise<void> = Promise.resolve();
   /** The daemon's own fired-subject prefix — blueprints must not subscribe to it (cycle guard). */
   private readonly ownFiredSubject: string;
 
@@ -65,8 +69,17 @@ export class BusSource {
     this.outcomeSub = null;
   }
 
-  /** Reconcile subscriptions with the live blueprint set (hot-reload). */
-  async sync(): Promise<void> {
+  /** Reconcile subscriptions with the live blueprint set (hot-reload). Serialized. */
+  sync(): Promise<void> {
+    const next = this.syncChain.then(() => this.syncInner());
+    this.syncChain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  private async syncInner(): Promise<void> {
     const blueprints = new Map(
       this.store
         .byKind("bus")
@@ -141,18 +154,22 @@ export class BusSource {
     return { signature: signatureOf(blueprint), unsubscribe: () => subscription.unsubscribe() };
   }
 
-  /** Coalesced flush of buffered ignored counts (one write per blueprint/day). */
+  /** Coalesced flush of buffered ignored counts (one write per blueprint/day).
+   * Failed writes KEEP their counts buffered for the next flush — a transient
+   * storage error never loses counter data (sage R-108 cycle-2 finding). */
   flushIgnored(): void {
     if (this.ignoredBuffer.size === 0) return;
     const day = new Date().toISOString().slice(0, 10);
-    for (const [blueprintId, count] of this.ignoredBuffer) {
+    for (const [blueprintId, count] of [...this.ignoredBuffer]) {
       try {
         this.repo.bumpIgnoredBy(blueprintId, day, count);
+        const current = this.ignoredBuffer.get(blueprintId) ?? 0;
+        if (current > count) this.ignoredBuffer.set(blueprintId, current - count);
+        else this.ignoredBuffer.delete(blueprintId);
       } catch (error) {
-        console.error(`[reflex-bus-source] ignored-counter flush failed for ${blueprintId}: ${(error as Error).message}`);
+        console.error(`[reflex-bus-source] ignored-counter flush failed for ${blueprintId} (retained for retry): ${(error as Error).message}`);
       }
     }
-    this.ignoredBuffer.clear();
   }
 
   private shouldWarnMissing(

@@ -91,7 +91,7 @@ describe("run-outcome contract module", () => {
 });
 
 describe("scenario 1+2: field-equals match fires; non-match ignored", () => {
-  it("matching envelope produces a decision with payload + correlation in snapshot", async () => {
+  it("matching envelope fires: payload in snapshot, FRESH activation correlation on the row", async () => {
     const r = await rig([busBp("pilot-scan", TASK_SUBJECT, { flow: "review" })]);
     const corr = crypto.randomUUID();
     await r.publish(TASK_SUBJECT, { flow: "review", pr: 7 }, "tasks.review.completed", corr);
@@ -99,6 +99,11 @@ describe("scenario 1+2: field-equals match fires; non-match ignored", () => {
     expect(history).toHaveLength(1);
     expect(history[0]!.outcome).toBe("fired");
     expect(history[0]!.impulse.payload).toEqual({ flow: "review", pr: 7 });
+    // A Fired row carries the FRESH activation correlation (the run join
+    // key, stamped by the pipeline) — deliberately NOT the source envelope's
+    // correlation, which would conflate the inbound chain with the new run.
+    expect(history[0]!.correlationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(history[0]!.correlationId).not.toBe(corr);
     await r.close();
   });
 
@@ -146,7 +151,12 @@ describe("scenario 5: self-cycle rejection", () => {
   });
 });
 
-describe("redelivery interplay", () => {
+describe("duplicate-payload interplay (broker redelivery surrogate)", () => {
+  // NOTE: this publishes the same payload twice — it proves the idempotency
+  // guard absorbs duplicates at the evaluate boundary. True JetStream
+  // redelivery (NAK/ack-timeout) is not exercised offline; the guard is the
+  // defense either way because redelivered envelopes re-enter via the same
+  // evaluate path with identical payloads.
   it("same payload twice → one fired + one idempotency block", async () => {
     const r = await rig([busBp("dup", TASK_SUBJECT)]);
     await r.publish(TASK_SUBJECT, { same: true });
