@@ -8,6 +8,7 @@ import { CommandRouter } from "./cmd/router";
 import { CommandHandlers } from "./handlers/commands";
 import { Pipeline } from "./pipeline/evaluate";
 import { BusSource } from "./sources/bus";
+import { HttpSource } from "./sources/http";
 import { ScheduleSource } from "./sources/schedule";
 import { openDb } from "./store/db";
 import { defaultDbPath } from "./store/paths";
@@ -16,6 +17,8 @@ import { Repository } from "./store/repository";
 export interface DaemonOptions {
   /** Override DB path (tests). Default: XDG state path. */
   dbPath?: string;
+  /** HTTP listener port (0 = ephemeral). Default 7717. */
+  httpPort?: number;
   /** Inject a transport-backed bus (tests). Default: NATS from config. */
   bus?: ReflexBus;
   /** Approval expiry sweep cadence. Default 30s. */
@@ -36,6 +39,7 @@ export interface ReflexDaemon extends ReflexDaemonHandle {
   repo: Repository;
   bus: ReflexBus;
   handlers: CommandHandlers;
+  http: HttpSource;
 }
 
 /**
@@ -73,6 +77,13 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
   const schedule = new ScheduleSource(store, pipeline);
   const handlers = new CommandHandlers(store, pipeline, repo);
   const busSource = new BusSource(cfg, store, bus, pipeline, repo);
+  const httpSource = new HttpSource(store, pipeline, { port: options.httpPort ?? 7717 });
+  // Zero-listener policy (spec NFR-2): the HTTP listener exists only while
+  // http-kind blueprints are loaded; hot-reload starts/stops it.
+  const syncHttp = () => {
+    if (store.byKind("http").length > 0) httpSource.start();
+    else void httpSource.stop();
+  };
   const busRef = bus;
   const router = new CommandRouter({
     cfg,
@@ -92,6 +103,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
   watcher.onReload(() => {
     schedule.sync();
     void busSource.sync();
+    syncHttp();
   });
   store.onBlueprintsRemoved((ids) => {
     const now = new Date().toISOString();
@@ -106,6 +118,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
   await watcher.start();
   schedule.start();
   await busSource.start();
+  syncHttp();
 
   // Approval expiry sweep: timeout'd Matched Decisions resolve to Expired.
   // Runs once now (no immortal waiting rows after downtime), then on an
@@ -129,12 +142,14 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
     repo,
     bus: busRef,
     handlers,
+    http: httpSource,
     scheduleStatus: () => schedule.status(),
     async stop() {
       if (stopped) return;
       stopped = true;
       schedule.stop();
       await busSource.stop();
+      await httpSource.stop();
       await watcher.stop();
       clearInterval(sweepTimer);
       await busRef.close();
