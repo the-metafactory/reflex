@@ -5,9 +5,9 @@
 ## Current
 
 - **Feature:** R-101 Myelin transport integration
-- **Step:** 1 (PLAN)
-- **Branch:** —
-- **PR:** —
+- **Step:** 7-8 (sage review on PR #4)
+- **Branch:** spec/r-101-myelin-transport
+- **PR:** #4
 
 ## Log
 
