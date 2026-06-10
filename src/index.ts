@@ -56,5 +56,7 @@ export {
 export { Pipeline, type PipelineOptions } from "./pipeline/evaluate";
 export type { EvaluateResult, GuardReason, Impulse } from "./pipeline/impulse";
 export type { DryRunVerdict } from "./pipeline/verdict";
+export { ScheduleSource, type ImpulseSink, type ScheduleStatus } from "./sources/schedule";
+export { startDaemon, type DaemonOptions, type ReflexDaemon } from "./daemon";
 // BoundedPublishQueue stays module-private (sage R-101 review): callers need
 // createReflexBus + metrics, not the outage-buffer implementation.
