@@ -4,6 +4,7 @@ import { BlueprintStore, loadBlueprintSet } from "./activation/store";
 import { createReflexBus, type ReflexBus } from "./bus";
 import { ensureReflexStream } from "./bus/stream";
 import type { ReflexConfig } from "./config/schema";
+import { CommandRouter } from "./cmd/router";
 import { CommandHandlers } from "./handlers/commands";
 import { Pipeline } from "./pipeline/evaluate";
 import { ScheduleSource } from "./sources/schedule";
@@ -71,6 +72,18 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
   const schedule = new ScheduleSource(store, pipeline);
   const handlers = new CommandHandlers(store, pipeline, repo);
   const busRef = bus;
+  const router = new CommandRouter({
+    cfg,
+    bus: busRef,
+    handlers,
+    pipeline,
+    repo,
+    store,
+    schedule,
+    daemonVersion: "0.1.0",
+    startedAt: new Date().toISOString(),
+  });
+  await router.start();
 
   // Lifecycle wiring: hot-reload syncs scheduler jobs + expires waiting
   // decisions of removed blueprints (R-102 FR-6 / CONTEXT.md).
