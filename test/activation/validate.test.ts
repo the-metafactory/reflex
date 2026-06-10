@@ -58,6 +58,28 @@ describe("validatePaths", () => {
     expect(result.errors[0]!.message).toContain("one.yaml");
   });
 
+  it("an invalid file contributes NO blueprints, not partial ones", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "reflex-validate-"));
+    // File with one valid entry followed by an in-file duplicate: whole file rejected.
+    writeFileSync(
+      join(dir, "partial.yaml"),
+      `schema: metafactory/activation/v1
+activations:
+  - id: first-ok
+    target: "@jc/a"
+    when:
+      manual: {}
+  - id: first-ok
+    target: "@jc/b"
+    when:
+      manual: {}
+`,
+    );
+    const result = await validatePaths([dir]);
+    expect(result.ok).toBe(false);
+    expect(result.blueprints).toEqual([]); // nothing partial leaked
+  });
+
   it("missing path is an error, not a throw", async () => {
     const result = await validatePaths(["/no/such/path"]);
     expect(result.ok).toBe(false);

@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { parseActivationDocument } from "./schema";
 import type { ActivationBlueprint, ImpulseKind } from "./types";
 
@@ -13,15 +12,14 @@ export class DuplicateIdError extends Error {
 }
 
 /**
- * Parse + merge a list of activation documents into one blueprint set.
- * A duplicate id across ANY two files is a load error naming both paths
- * (spec FR-4 — fail loud, no silent shadowing).
+ * Merge already-parsed blueprints into one set. Duplicate id across ANY two
+ * sources throws DuplicateIdError naming both paths (spec FR-4). Shared by
+ * the daemon loader and `validatePaths` so the two can never disagree.
  */
-export async function loadBlueprintSet(files: string[]): Promise<ActivationBlueprint[]> {
+export function mergeBlueprints(parsed: ActivationBlueprint[][]): ActivationBlueprint[] {
   const byId = new Map<string, ActivationBlueprint>();
-  for (const file of files) {
-    const text = readFileSync(file, "utf-8");
-    for (const blueprint of parseActivationDocument(text, file)) {
+  for (const list of parsed) {
+    for (const blueprint of list) {
       const existing = byId.get(blueprint.id);
       if (existing) {
         throw new DuplicateIdError(blueprint.id, existing.sourceFile, blueprint.sourceFile);
@@ -30,6 +28,18 @@ export async function loadBlueprintSet(files: string[]): Promise<ActivationBluep
     }
   }
   return [...byId.values()];
+}
+
+/**
+ * Read + parse + merge a list of activation documents. Reads are async —
+ * the reload path runs on the daemon event loop and must not block it
+ * (sage R-102 finding).
+ */
+export async function loadBlueprintSet(files: string[]): Promise<ActivationBlueprint[]> {
+  const parsed = await Promise.all(
+    files.map(async (file) => parseActivationDocument(await Bun.file(file).text(), file)),
+  );
+  return mergeBlueprints(parsed);
 }
 
 /**

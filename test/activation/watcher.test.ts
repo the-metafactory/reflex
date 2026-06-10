@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BlueprintStore, loadBlueprintSet } from "../../src/activation/store";
@@ -68,6 +68,14 @@ describe("ActivationWatcher", () => {
     writeFileSync(join(central, "b.yaml"), docFor("bb"));
     await until(() => store.get("bb") !== undefined);
     expect(store.get("bb")).toBeDefined();
+
+    const removed: string[][] = [];
+    store.onBlueprintsRemoved((ids) => removed.push(ids));
+    rmSync(join(central, "b.yaml"));
+    await until(() => store.get("bb") === undefined);
+    expect(store.get("bb")).toBeUndefined();
+    expect(store.get("aa")).toBeDefined();
+    expect(removed).toEqual([["bb"]]);
     await watcher.stop();
   });
 });

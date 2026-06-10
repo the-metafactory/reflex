@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parseActivationDocument } from "./schema";
 import { DuplicateIdError } from "./store";
@@ -16,6 +16,10 @@ export interface ValidationResult {
  * files and/or directories; directories are scanned for activation documents
  * (reflex.yaml sidecars anywhere + any *.yaml at the top level). Reports one
  * error block per offending file and cross-file duplicate ids.
+ *
+ * A file's blueprints enter the merged result only when the WHOLE file is
+ * valid — an invalid file contributes errors, never partial blueprints
+ * (sage R-102 finding).
  */
 export async function validatePaths(paths: string[]): Promise<ValidationResult> {
   const files: string[] = [];
@@ -40,14 +44,17 @@ export async function validatePaths(paths: string[]): Promise<ValidationResult> 
   const byId = new Map<string, ActivationBlueprint>();
   for (const file of [...new Set(files)].sort()) {
     try {
-      const parsed = parseActivationDocument(readFileSync(file, "utf-8"), file);
+      const parsed = parseActivationDocument(await Bun.file(file).text(), file);
+      // Stage the whole file first; merge only if it is clean end-to-end.
+      const staged = new Map<string, ActivationBlueprint>();
       for (const blueprint of parsed) {
-        const existing = byId.get(blueprint.id);
+        const existing = byId.get(blueprint.id) ?? staged.get(blueprint.id);
         if (existing) {
           throw new DuplicateIdError(blueprint.id, existing.sourceFile, blueprint.sourceFile);
         }
-        byId.set(blueprint.id, blueprint);
+        staged.set(blueprint.id, blueprint);
       }
+      for (const [id, blueprint] of staged) byId.set(id, blueprint);
     } catch (error) {
       errors.push({ file, message: (error as Error).message });
     }

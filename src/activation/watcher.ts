@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
-import { readFileSync } from "node:fs";
 import { discoverActivationFiles, type DiscoverOptions } from "./sources";
-import { BlueprintStore, loadBlueprintSet } from "./store";
+import { BlueprintStore, mergeBlueprints } from "./store";
+import { parseActivationDocument } from "./schema";
 
 export interface WatcherOptions {
   /** Debounce window for filesystem event storms. Default 200ms. */
@@ -40,7 +40,7 @@ export class ActivationWatcher {
   }
 
   async start(): Promise<void> {
-    this.lastHash = await this.contentHash();
+    this.lastHash = (await this.readCorpus()).hash;
     const dirs = [...this.sources.watchRoots, this.sources.activationsDir];
     for (const dir of dirs) {
       try {
@@ -70,26 +70,36 @@ export class ActivationWatcher {
     }, this.debounceMs);
   }
 
-  private async contentHash(): Promise<string> {
+  /**
+   * One async read pass over the corpus: contents feed BOTH the change hash
+   * and (when changed) the parse — no synchronous reads, no double read of
+   * the same files (sage R-102 finding: reload must not block the daemon
+   * event loop).
+   */
+  private async readCorpus(): Promise<{ hash: string; docs: Array<{ file: string; text: string }> }> {
     const files = await discoverActivationFiles({ ...this.sources, onWarning: () => {} });
+    const docs = await Promise.all(
+      files.map(async (file) => {
+        try {
+          return { file, text: await Bun.file(file).text() };
+        } catch {
+          return { file, text: "<unreadable>" };
+        }
+      }),
+    );
     const hasher = new Bun.CryptoHasher("sha256");
-    for (const file of files) {
-      hasher.update(file);
-      try {
-        hasher.update(readFileSync(file));
-      } catch {
-        hasher.update("<unreadable>");
-      }
+    for (const doc of docs) {
+      hasher.update(doc.file);
+      hasher.update(doc.text);
     }
-    return hasher.digest("hex");
+    return { hash: hasher.digest("hex"), docs };
   }
 
   private async reload(): Promise<void> {
     try {
-      const hash = await this.contentHash();
+      const { hash, docs } = await this.readCorpus();
       if (hash === this.lastHash) return; // event without content change
-      const files = await discoverActivationFiles(this.sources);
-      const next = await loadBlueprintSet(files);
+      const next = mergeBlueprints(docs.map((d) => parseActivationDocument(d.text, d.file)));
       this.store.swap(next);
       this.lastHash = hash;
       this.lastErrorMessage = null;
