@@ -23,7 +23,7 @@ features:
 
   - id: R-102
     name: "Config loader + schema + hot-reload"
-    status: planned
+    status: done
     iteration: 1
     depends: [R-101]
     description: "metafactory/activation/v1 zod schema. Load reflex.yaml sidecars from configured roots + ~/.config/reflex/activations/*.yaml, merged; duplicate blueprint id = load error. File watcher hot-reloads blueprint set atomically; Matched Decisions for removed blueprints expire with reason blueprint-removed. reflex validate works daemon-less."
