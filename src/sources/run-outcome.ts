@@ -1,9 +1,11 @@
 import type { ReflexConfig } from "../config/schema";
 
 /**
- * THE pulse run-lifecycle contract boundary (pulse#27 still open): the
- * subject Reflex consumes for Execution Run outcomes and how a terminal
- * outcome is detected. When pulse pins its contract, ONLY this file changes.
+ * The pulse run-lifecycle contract boundary (pulse#27 still open): the
+ * subject Reflex consumes and how a terminal outcome is detected. A pulse
+ * contract change lands primarily here; note that BusSource.start() also
+ * reads `envelope.type` and `envelope.correlation_id` — those two envelope
+ * fields are part of the assumed contract surface.
  */
 export function runOutcomeSubject(cfg: Pick<ReflexConfig, "principal" | "stack">): string {
   return `local.${cfg.principal}.${cfg.stack}.pulse.run.>`;

@@ -102,11 +102,16 @@ describe("scenario 1+2: field-equals match fires; non-match ignored", () => {
     await r.close();
   });
 
-  it("non-matching envelope: no decision row, ignored counter bumped", async () => {
+  it("non-matching envelopes coalesce: no decision rows, ONE flushed counter write", async () => {
     const r = await rig([busBp("pilot-scan", TASK_SUBJECT, { flow: "review" })]);
     await r.publish(TASK_SUBJECT, { flow: "deploy" });
+    await r.publish(TASK_SUBJECT, { flow: "deploy" });
+    await r.publish(TASK_SUBJECT, { flow: "other" });
     expect(r.repo.historyFor({ blueprintId: "pilot-scan" })).toEqual([]);
-    expect(r.repo.ignoredCount("pilot-scan", "2026-06-10")).toBe(1);
+    const day = new Date().toISOString().slice(0, 10);
+    expect(r.repo.ignoredCount("pilot-scan", day)).toBe(0); // buffered, not yet written
+    r.source.flushIgnored();
+    expect(r.repo.ignoredCount("pilot-scan", day)).toBe(3); // coalesced single write
     await r.close();
   });
 });
@@ -153,7 +158,7 @@ describe("redelivery interplay", () => {
 });
 
 describe("hot-reload sync", () => {
-  it("orphan-free after 50 random mutations", async () => {
+  it("orphan-free after a 50-step deterministic mutation sweep (add/remove/change)", async () => {
     const r = await rig([busBp("a")]);
     let pool = ["a"];
     for (let i = 0; i < 50; i++) {

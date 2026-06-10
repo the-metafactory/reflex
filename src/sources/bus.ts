@@ -28,6 +28,10 @@ export class BusSource {
   private subscriptions = new Map<string, ActiveSubscription>();
   private outcomeSub: { unsubscribe: () => Promise<void> } | null = null;
   private missingFieldWarned = new Set<string>();
+  /** Ignored counts buffer (sage R-108): non-matches coalesce in memory —
+   * the hot bus callback never does a synchronous DB write per envelope. */
+  private ignoredBuffer = new Map<string, number>();
+  private flushTimer: ReturnType<typeof setInterval> | null = null;
   /** The daemon's own fired-subject prefix — blueprints must not subscribe to it (cycle guard). */
   private readonly ownFiredSubject: string;
 
@@ -43,6 +47,7 @@ export class BusSource {
 
   async start(): Promise<void> {
     await this.sync();
+    this.flushTimer = setInterval(() => this.flushIgnored(), 5_000);
     this.outcomeSub = await this.bus.subscribe(runOutcomeSubject(this.cfg), async (envelope) => {
       const outcome = terminalOutcomeOf(envelope.type);
       if (!outcome || !envelope.correlation_id) return;
@@ -51,6 +56,9 @@ export class BusSource {
   }
 
   async stop(): Promise<void> {
+    if (this.flushTimer) clearInterval(this.flushTimer);
+    this.flushTimer = null;
+    this.flushIgnored();
     for (const sub of this.subscriptions.values()) await sub.unsubscribe();
     this.subscriptions.clear();
     if (this.outcomeSub) await this.outcomeSub.unsubscribe();
@@ -115,7 +123,7 @@ export class BusSource {
           if (when.where && this.shouldWarnMissing(blueprint.id, when.where, envelope.payload)) {
             console.debug(`[reflex-bus-source] ${blueprint.id}: where-field absent from payload — never matches`);
           }
-          this.repo.bumpIgnored(blueprint.id, new Date().toISOString().slice(0, 10));
+          this.ignoredBuffer.set(blueprint.id, (this.ignoredBuffer.get(blueprint.id) ?? 0) + 1);
           return;
         }
         const impulse: Impulse = {
@@ -131,6 +139,20 @@ export class BusSource {
       { durableName: `reflex-bus-${blueprint.id}`, deliverPolicy: "new", ackPolicy: "explicit" },
     );
     return { signature: signatureOf(blueprint), unsubscribe: () => subscription.unsubscribe() };
+  }
+
+  /** Coalesced flush of buffered ignored counts (one write per blueprint/day). */
+  flushIgnored(): void {
+    if (this.ignoredBuffer.size === 0) return;
+    const day = new Date().toISOString().slice(0, 10);
+    for (const [blueprintId, count] of this.ignoredBuffer) {
+      try {
+        this.repo.bumpIgnoredBy(blueprintId, day, count);
+      } catch (error) {
+        console.error(`[reflex-bus-source] ignored-counter flush failed for ${blueprintId}: ${(error as Error).message}`);
+      }
+    }
+    this.ignoredBuffer.clear();
   }
 
   private shouldWarnMissing(
