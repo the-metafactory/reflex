@@ -30,6 +30,10 @@ export const configSchema = z.object({
     .object({
       url: z.string().url().default("nats://127.0.0.1:4222"),
       creds: z.string().min(1).default(join(homedir(), ".config/nats/creds/reflex.creds")),
+      /** Dev-only: connect unauthenticated (matches current ecosystem
+       * practice — cortex/sage connect insecure to the local bus). The
+       * daemon warns loudly; production keeps the DD-72 creds fail-fast. */
+      insecure: z.boolean().default(false),
     })
     .default({}),
   publish_queue_limit: z.number().int().positive().default(1000),
@@ -46,7 +50,7 @@ export const configSchema = z.object({
 export interface ReflexConfig {
   principal: string;
   stack: string;
-  nats: { url: string; creds: string };
+  nats: { url: string; creds: string; insecure: boolean };
   publishQueueLimit: number;
   sovereignty: z.infer<typeof sovereigntySchema>;
   watchRoots: string[];

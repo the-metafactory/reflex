@@ -7,7 +7,7 @@ export function testConfig(overrides: Partial<ReflexConfig> = {}): ReflexConfig 
   return {
     principal: "jc",
     stack: "default",
-    nats: { url: "nats://127.0.0.1:4222", creds: "/tmp/nonexistent.creds" },
+    nats: { url: "nats://127.0.0.1:4222", creds: "/tmp/nonexistent.creds", insecure: false },
     publishQueueLimit: 1000,
     watchRoots: [],
     activationsDir: "/tmp/reflex-test-activations",

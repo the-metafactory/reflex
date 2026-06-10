@@ -75,6 +75,25 @@ class Counter {
  * without a readable creds file — do not wait for the first connect to
  * discover misconfig. */
 function buildNatsTransport(cfg: ReflexConfig): NATSTransport {
+  if (cfg.nats.insecure) {
+    // Explicit dev opt-out of the DD-72 creds fail-fast — LOOPBACK ONLY.
+    // A non-local URL with insecure=true is a misconfiguration, not a mode:
+    // unauthenticated traffic to a remote bus is never acceptable (sage
+    // R-110 security finding).
+    const host = new URL(cfg.nats.url).hostname;
+    if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
+      throw new Error(
+        `nats.insecure=true is loopback-only (got ${host}) — provision DD-72 credentials for remote servers`,
+      );
+    }
+    console.warn("[reflex-bus] INSECURE: connecting to NATS without credentials (nats.insecure=true, loopback)");
+    return new NATSTransport({
+      servers: cfg.nats.url,
+      name: `reflex-${cfg.principal}`,
+      reconnect: true,
+      streamName: REFLEX_STREAM_NAME,
+    });
+  }
   if (!existsSync(cfg.nats.creds)) {
     throw new Error(
       `NATS credentials file not found: ${cfg.nats.creds} — provision per DD-72 ` +

@@ -1,0 +1,10 @@
+# Manual-kind Activation Blueprint: the `reflex fire f-testing` story.
+# A manual fire is a normal Impulse — it goes through the FULL pipeline
+# (policy, guards); there is deliberately no bypass.
+schema: metafactory/activation/v1
+activations:
+  - id: f-testing
+    target: "@jc/f-testing"
+    when:
+      manual: {}                   # fired only via the CLI (or any command-subject requester)
+    policy: auto

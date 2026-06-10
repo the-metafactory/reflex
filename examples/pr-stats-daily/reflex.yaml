@@ -1,0 +1,15 @@
+# Schedule-kind Activation Blueprint: fires @jc/f-pr-stats every morning.
+# Sidecar convention: this file would sit next to the flow it activates.
+schema: metafactory/activation/v1
+activations:
+  - id: pr-stats-daily            # Activation Blueprint id — global across all config surfaces
+    target: "@jc/f-pr-stats"      # Execution Blueprint ref (opaque to Reflex; Pulse resolves it)
+    when:                          # When Block — exactly one Impulse Kind per blueprint (v0)
+      schedule: "0 7 * * *"        # Internal Impulse: cron expression, validated by the same croner that runs it
+      timezone: Europe/Zurich      # IANA timezone; DST handled by croner
+    policy: auto                   # Activation Policy: auto-fire (no Activation Approval needed)
+    guards:
+      cooldown: 6h                 # Activation Guard: blueprint cannot fire again within the window
+      run_lock: skip               # Run Lock conflict mode: a tick during an in-flight run is Blocked
+    payload:
+      mode: daily                  # merged into the Activation Payload the Execution Run receives

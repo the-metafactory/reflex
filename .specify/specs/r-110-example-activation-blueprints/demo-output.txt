@@ -1,0 +1,26 @@
+$ ./examples/demo.sh   (captured 2026-06-11, local nats-server -js, review cycle 2 — INSECURE warnings elided)
+=== reflex status ===
+reflex-daemon 0.1.0
+blueprints: 3 (manual: 1, bus: 1, schedule: 1)
+Matched Decisions awaiting approval: 0
+next ticks: pr-stats-daily @ 2026-06-11T05:00:00.000Z
+
+=== reflex fire f-testing ===
+fired (decision 9244cffc-1806-4950-b587-37fcf4bc6dc1)
+
+=== reflex fire f-testing (same input again — the always-on Idempotency Key guard blocks the duplicate) ===
+blocked (decision d19362f5-c734-48fb-9a02-c055287aa7aa) — idempotency
+
+=== reflex pending (Matched Decisions awaiting approval) ===
+Matched Decisions awaiting approval:
+(none)
+
+=== reflex history ===
+at                        blueprintId  outcome  reason       decisionId
+------------------------  -----------  -------  -----------  ------------------------------------
+2026-06-10T22:48:03.795Z  f-testing    blocked  idempotency  d19362f5-c734-48fb-9a02-c055287aa7aa
+2026-06-10T22:48:03.587Z  f-testing    fired                 9244cffc-1806-4950-b587-37fcf4bc6dc1
+
+=== stopping daemon ===
+[reflex-daemon] stopped
+demo complete — the duplicate fire above shows guard behavior as an honest Blocked entry
