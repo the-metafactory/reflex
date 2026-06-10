@@ -10,9 +10,22 @@ export const sovereigntySchema = z.object({
   model_class: z.enum(["local-only", "frontier", "any"]).default("any"),
 });
 
+/**
+ * principal/stack are interpolated into NATS subjects — they must be single
+ * safe tokens. Wildcards (`*`, `>`) or separators (`.`) in a config/env value
+ * would silently broaden the REFLEX stream scope (sage R-101 security finding).
+ */
+const subjectToken = (name: string) =>
+  z
+    .string()
+    .min(1)
+    .regex(/^[A-Za-z0-9_-]+$/, {
+      message: `${name} must be a single NATS subject token ([A-Za-z0-9_-]) — '.', '*', '>' are not allowed`,
+    });
+
 export const configSchema = z.object({
-  principal: z.string().min(1),
-  stack: z.string().min(1).default("default"),
+  principal: subjectToken("principal"),
+  stack: subjectToken("stack").default("default"),
   nats: z
     .object({
       url: z.string().url().default("nats://127.0.0.1:4222"),

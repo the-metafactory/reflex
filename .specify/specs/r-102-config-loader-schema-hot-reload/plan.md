@@ -77,7 +77,7 @@ Framework: `bun:test`, real tmp dirs (`mkdtemp`), no watcher mocking — real `f
 
 ## Constitutional Compliance
 
-- CLI-First: `validatePaths` is the `reflex validate` core ✓ · Library-First: exported from `src/index.ts` ✓ · Test-First: RED per task ✓ · Deterministic: content-hash reloads, fixed debounce ✓ · Code Before Prompts ✓
+- These are commitments the implementation must satisfy, verified at the R-102 done gate (not yet demonstrated): CLI-First — `validatePaths` becomes the `reflex validate` core; Library-First — exported from `src/index.ts`; Test-First — RED per task; Deterministic — content-hash reloads, fixed debounce; Code Before Prompts.
 
 ## Implementation Order (→ tasks.md)
 

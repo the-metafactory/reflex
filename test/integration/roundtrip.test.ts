@@ -25,7 +25,7 @@ describe.skipIf(!up)("integration: publish round-trip", () => {
       async (envelope) => {
         received.push(envelope);
       },
-      { durableName: `reflex-itest-${Date.now()}`, deliverPolicy: "new", ackPolicy: "explicit" },
+      { deliverPolicy: "new", ackPolicy: "explicit" }, // ephemeral: durables accumulate on shared JetStream (sage finding)
     );
 
     const correlationId = crypto.randomUUID();

@@ -93,4 +93,19 @@ describe("loadConfig", () => {
     const cfg = loadConfig({ configPath: file });
     expect(cfg.publishQueueLimit).toBe(50);
   });
+
+  it("rejects principal/stack containing subject metacharacters", () => {
+    for (const bad of ["jc.evil", "j*", "j>", "a b"]) {
+      const file = writeConfigFile(`principal: "${bad}"\n`);
+      expect(() => loadConfig({ configPath: file })).toThrow(/principal must be a single NATS subject token/);
+    }
+    const stackFile = writeConfigFile('principal: jc\nstack: "bad.stack"\n');
+    expect(() => loadConfig({ configPath: stackFile })).toThrow(/stack must be a single NATS subject token/);
+  });
+
+  it("rejects non-numeric queue limit env naming the raw value", () => {
+    const file = writeConfigFile("principal: jc\n");
+    process.env.REFLEX_PUBLISH_QUEUE_LIMIT = "abc";
+    expect(() => loadConfig({ configPath: file })).toThrow(/Invalid REFLEX_PUBLISH_QUEUE_LIMIT: "abc"/);
+  });
 });

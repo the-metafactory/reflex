@@ -192,6 +192,13 @@ export function createReflexBus(cfg: ReflexConfig, options: ReflexBusOptions = {
           const reply = await handler(envelope);
           const replyTo = (envelope.extensions?.reply_to as string | undefined) ?? undefined;
           if (!replyTo) return;
+          // Reply only to well-formed concrete inboxes — a crafted reply_to
+          // could otherwise aim our publish at an arbitrary subject.
+          if (!replyTo.startsWith("_INBOX.") || replyTo.includes("*") || replyTo.includes(">")) {
+            handlerErrors += 1;
+            console.error(`[reflex-bus] invalid reply_to '${replyTo}' on ${subject} — reply dropped`);
+            return;
+          }
           // Reply goes through the RAW transport: _INBOX.* subjects are
           // outside the myelin subject grammar by design, so
           // EnvelopeTransport's subject/envelope alignment check would
