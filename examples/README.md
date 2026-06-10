@@ -31,7 +31,7 @@ When a `tasks.review.completed` envelope with `flow: review` appears on the bus,
 reflex fire f-testing --input '{"suite":"smoke"}'
 ```
 
-The CLI produces a `manual` Impulse through the full pipeline — policy and every Activation Guard apply; there is no bypass. The command returns the decision verdict synchronously.
+The CLI produces a `manual` Impulse through the full pipeline. Guard enforcement on the manual path is demonstrable, not asserted: the demo fires this blueprint twice with identical input and the duplicate is blocked by the always-on Idempotency Key guard (`blocked — idempotency` in history); cooldown blocking a manual fire is proven in the handler test suite. The command returns the decision verdict synchronously.
 
 ## The acceptance walk
 

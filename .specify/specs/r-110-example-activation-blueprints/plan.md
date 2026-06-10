@@ -44,7 +44,7 @@ No new types. The examples are instances of `metafactory/activation/v1` (R-102 s
 
 ## Scope Verification
 
-IN: three sidecar examples, README walk-through, demo.sh, end-to-end suite, validate + vocabulary gates. NOT in (per spec Out of Scope): http-kind example (R-109 ships its own fixtures), registry publication of examples (DD-62 later phases). The "spec 86%" figure is the specflow spec-quality LLM-judge rubric score (threshold 80) recorded at SPECIFY; the gap is rubric-style points (Given/When/Then framing), not unaccounted requirements — every FR/NFR in spec.md appears in the table above.
+IN: three sidecar examples, README walk-through, demo.sh, end-to-end suite, validate + vocabulary gates. NOT in (per spec Out of Scope): http-kind example (R-109 ships its own fixtures), registry publication of examples (DD-62 later phases). The "spec 86%" figure is the specflow spec-quality LLM-judge rubric score (threshold 80) recorded at SPECIFY; the gap is rubric-style points (Given/When/Then framing). Traceability is the table above: spec FR-1..FR-8 and NFR-1..NFR-3 each have a row naming their implementation (FR-1..3 examples, FR-4 comments, FR-5 README, FR-6 e2e suite, FR-7 validate gate, FR-8 demo.sh; NFR-1 README completeness, NFR-2 duration assertion, NFR-3 vocab grep).
 
 ## Failure Modes & Blast Radius
 
