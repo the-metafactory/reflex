@@ -1,12 +1,85 @@
 schema: blueprint/v1
-repo: cue
+repo: reflex
+
+# Reflex — activation runtime (formerly cue; renamed 2026-06-10).
+# Feature graph per docs/design-reflex-v0.md. R-100 supersedes the C-1 spec feature.
 
 features:
-  # Iteration 1 — Cue v0
-  - id: C-1
-    name: "Cue v0 spec — standalone daemon, CLI, YAML sidecar, hot-reload"
-    status: planned
+  # Iteration 1 — Reflex v0 MVP
+  - id: R-100
+    name: "Reflex v0 design doc + repo bootstrap"
+    status: done
     iteration: 1
     issue: 1
     depends: []
-    description: "Foundational Cue v0: standalone daemon process with trigger evaluation, CLI for fire/list/inspect, cue.yaml sidecar config (per-flow), hot-reload on sidecar change. Publishes cue.fired events to NATS. Anchors downstream consumers (pulse:P-501 executor, metafactory-actions:MA-1 sidecar rollout)."
+    description: "Design session output: docs/design-reflex-v0.md capturing daemon architecture, full decision pipeline (decision/policy/approval/guards/event), wire rename mf.{net}.reflex.activation.>, config surfaces, storage, CLI. Supersedes cue-era C-1."
+
+  - id: R-101
+    name: "Transport + CloudEvents envelope"
+    status: planned
+    iteration: 1
+    depends: []
+    description: "Transport abstraction (DD-69 pattern): NATSTransport + InMemoryTransport. CloudEvents v1.0 envelope with mf* extensions (DD-68). NATS accounts creds at ~/.config/nats/creds/reflex.creds (DD-72). bun test runs without live NATS."
+
+  - id: R-102
+    name: "Config loader + schema + hot-reload"
+    status: planned
+    iteration: 1
+    depends: [R-101]
+    description: "metafactory/activation/v1 zod schema. Load reflex.yaml sidecars from configured roots + ~/.config/reflex/activations/*.yaml, merged; duplicate rule id = load error. File watcher hot-reloads rule set atomically; pending approvals for removed rules expire with reason rule-removed. reflex validate works daemon-less."
+
+  - id: R-103
+    name: "SQLite storage (Drizzle)"
+    status: planned
+    iteration: 1
+    depends: []
+    description: "Tables: decisions, approvals, guard_state, fired_events at ~/.local/state/reflex/reflex.db. Ignored decisions stored as per-rule counters, not rows."
+
+  - id: R-104
+    name: "Decision pipeline core"
+    status: planned
+    iteration: 1
+    depends: [R-102, R-103]
+    description: "Impulse -> rule evaluation -> Activation Decision (ignored/matched/blocked/fired) -> policy (auto/approval/disabled) -> guards (cooldown, run lock with skip/buffer/allow overlap, idempotency key) -> Activation Event publish to mf.{net}.reflex.activation.fired.{target}. Decision audit events on mf.{net}.reflex.activation.decision.{outcome}. Dry-run path emits nothing."
+
+  - id: R-105
+    name: "Scheduler trigger (cron impulses)"
+    status: planned
+    iteration: 1
+    depends: [R-104]
+    description: "Internal impulse source: cron expressions with timezone (croner). Drives schedule-type activation rules."
+
+  - id: R-106
+    name: "Manual fire + approval flow"
+    status: planned
+    iteration: 1
+    depends: [R-104]
+    description: "reflex fire <rule> --input json as programmatic impulse. Approval lifecycle: matched decisions wait, reflex approve/deny <decision-id>, per-rule approval_timeout (default 1h) expires to terminal state."
+
+  - id: R-107
+    name: "CLI over NATS request/reply"
+    status: planned
+    iteration: 1
+    depends: [R-101, R-103]
+    description: "reflex status/list/fire/approve/deny/pending/history/test/validate. Daemon serves mf.{net}.reflex.cmd.> request/reply; CLI is a thin NATS client. Cortex can issue identical commands later."
+
+  - id: R-108
+    name: "Event trigger (bus subscription + matcher)"
+    status: planned
+    iteration: 1
+    depends: [R-104]
+    description: "Per-rule NATS subject subscriptions; match = subject pattern + flat field-equals conditions on CloudEvents data. No expression language in v0. Also consumes mf.{net}.pulse.run.> outcomes for run-lock release and buffer overlap firing."
+
+  - id: R-109
+    name: "Minimal webhook listener"
+    status: planned
+    iteration: 1
+    depends: [R-104]
+    description: "Localhost HTTP endpoint auto-generated per webhook-type rule (POST /hook/{rule-id}), bearer-token auth only. External impulse source. Windmill pattern, deliberately minimal."
+
+  - id: R-110
+    name: "Example activation blueprints"
+    status: planned
+    iteration: 1
+    depends: [R-105, R-106, R-108]
+    description: "Three committed examples: F_PR_STATS daily schedule, Pilot 30-min scan (event + approval), F_TESTING manual trigger. Serve as living docs and integration-test fixtures."
