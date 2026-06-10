@@ -58,7 +58,7 @@ features:
 
   - id: R-107
     name: "CLI over NATS request/reply"
-    status: planned
+    status: done
     iteration: 1
     depends: [R-101, R-103]
     description: "reflex status/list/fire/approve/deny/pending/history/test/validate. Daemon serves mf.{net}.reflex.cmd.> request/reply; CLI is a thin NATS client. Cortex can issue identical commands later."
