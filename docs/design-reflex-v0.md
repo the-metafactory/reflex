@@ -152,22 +152,24 @@ Ignored Decisions are recorded as counters per blueprint (not full rows) to keep
 
 ## 7. Wire Protocol
 
-All envelopes CloudEvents v1.0 per DD-68 (`mf*` extensions, `mfnetworkid` required). NATS accounts + per-component creds per DD-72 (`~/.config/nats/creds/reflex.creds`).
+**Revised 2026-06-10 (decision 22): Reflex rides myelin.** The original framing (CloudEvents v1.0 per DD-68, literal `mf.{net}.reflex.activation.>` subjects per DD-70) is superseded — those DDs were decided 2026-04 but never implemented; the ecosystem converged on `@the-metafactory/myelin` instead (cortex, grove, sage, and pilot all ship on it). All Reflex events are **MyelinEnvelope**s; subjects are derived via myelin `deriveNatsSubject(envelope)` under the myelin namespace (`local.{principal}.{stack}.{domain}.{entity}.{action}`), never hand-built. NATS accounts + per-component creds per DD-72 (`~/.config/nats/creds/reflex.creds`) still apply.
 
-**Publishes:**
+**Publishes (envelope types):**
 
-| Subject | Type | When |
-|---|---|---|
-| `mf.{net}.reflex.activation.fired.{target}` | `reflex.activation.fired` | Fired Decision commits to starting a run |
-| `mf.{net}.reflex.activation.decision.{outcome}` | `reflex.activation.decision` | Matched/Blocked/Denied/Expired decisions (audit, Miner provenance; Ignored not published) |
+| Type | When |
+|---|---|
+| `reflex.activation.fired` | Fired Decision commits to starting a run — carries target Execution Blueprint ref, Activation Payload, Idempotency Key, decision link, fresh `correlation_id` |
+| `reflex.activation.decision.{outcome}` | Matched/Blocked/Denied/Expired decisions (audit, Miner provenance; Ignored not published) |
+
+Tracing rides myelin first-class `correlation_id`; causation + actor identity ride `extensions.causation_id` / `extensions.actor`. Sovereignty classification `local` by default; envelopes unsigned in v0 (matching pulse demo-bus practice).
 
 **Consumes:**
 
-| Subject | Why |
+| Subscription | Why |
 |---|---|
-| Per-blueprint `bus` subjects | Bus impulse matching |
-| `mf.{net}.pulse.run.>` | Run outcomes for Run Lock release + Buffered Impulse re-presentation |
-| `mf.{net}.reflex.cmd.>` | CLI request/reply (below) |
+| Per-blueprint `bus` subjects (myelin-derived) | Bus impulse matching |
+| Pulse run-lifecycle subjects | Run outcomes for Run Lock release + Buffered Impulse re-presentation |
+| Reflex command subjects | CLI request/reply (below) |
 
 **Dry Run:** `reflex test <blueprint-id> [--impulse file.json]` evaluates the full pipeline and reports a **Dry Run Verdict** — the predicted decision outcome ("would fire", "would block: cooldown until 18:00"). A Dry Run Verdict mutates no guard state, emits no events, and is not part of decision history. Activation Decisions record only real evaluations.
 
@@ -241,3 +243,9 @@ TypeScript + Bun. Dependencies: `@nats-io/transport-node` + `@nats-io/jetstream`
 | 19 | `reflex pending` kept as friendly CLI verb; "pending" banned elsewhere | `reflex matched`; `reflex approvals` |
 | 20 | Config key `run_lock: skip \| buffer`, absence = concurrent allowed; "overlap" banned | `overlap:` with `allow` value |
 | 21 | Dry Run produces a **Dry Run Verdict** — not an Activation Decision, no guard mutation, not in history | Flagged dry decisions in the audit log |
+
+### Spec session (2026-06-10, evening)
+
+| # | Decision | Rejected alternatives |
+|---|---|---|
+| 22 | Wire = **myelin**: `@the-metafactory/myelin` git-pinned for transport, MyelinEnvelope, derived subjects, request-reply. DD-68 CloudEvents + DD-70 literal `mf.*` subjects superseded (never implemented; cortex/grove/sage/pilot all on myelin). Operator-directed, codebase-verified | Reflex-local transport build (interview answer, reversed same day); CloudEvents per DD-68 |

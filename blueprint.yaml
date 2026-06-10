@@ -15,11 +15,11 @@ features:
     description: "Design session output: docs/design-reflex-v0.md capturing daemon architecture, full decision pipeline (decision/policy/approval/guards/event), wire rename mf.{net}.reflex.activation.>, config surfaces, storage, CLI. Supersedes cue-era C-1."
 
   - id: R-101
-    name: "Transport + CloudEvents envelope"
+    name: "Myelin transport integration"
     status: planned
     iteration: 1
     depends: []
-    description: "Transport abstraction (DD-69 pattern): NATSTransport + InMemoryTransport. CloudEvents v1.0 envelope with mf* extensions (DD-68). NATS accounts creds at ~/.config/nats/creds/reflex.creds (DD-72). bun test runs without live NATS."
+    description: "Consume @the-metafactory/myelin (git-pinned): NATSTransport + InMemoryTransport + request-reply + MyelinEnvelope + derived subjects. src/bus/ wrapper, envelope builders for reflex.activation.* types, ensureStream, config file + env overrides, fail-fast startup, bounded publish queue. bun test offline; integration suite on local NATS. Supersedes CloudEvents/DD-68 framing (decision 22)."
 
   - id: R-102
     name: "Config loader + schema + hot-reload"

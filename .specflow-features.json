@@ -1,0 +1,72 @@
+[
+  {
+    "id": "R-101",
+    "name": "Transport + CloudEvents envelope",
+    "description": "Transport abstraction (DD-69 pattern): NATSTransport + InMemoryTransport. CloudEvents v1.0 envelope with mf* extensions (DD-68). NATS accounts creds at ~/.config/nats/creds/reflex.creds (DD-72). bun test runs without live NATS.",
+    "dependencies": [],
+    "priority": 1
+  },
+  {
+    "id": "R-102",
+    "name": "Config loader + schema + hot-reload",
+    "description": "metafactory/activation/v1 zod schema. Load reflex.yaml sidecars from configured roots + ~/.config/reflex/activations/*.yaml, merged; duplicate blueprint id = load error. File watcher hot-reloads blueprint set atomically; Matched Decisions for removed blueprints expire with reason blueprint-removed. reflex validate works daemon-less. One config entry = one Activation Blueprint with a when: block (impulse kinds: schedule|manual|bus|http).",
+    "dependencies": ["R-101"],
+    "priority": 2
+  },
+  {
+    "id": "R-103",
+    "name": "SQLite storage (Drizzle)",
+    "description": "Tables: decisions (immutable rows, six outcomes), approvals (matched/approved/denied/expired lifecycle), guard_state (cooldowns, run locks, buffered impulses, idempotency keys), fired_events. ~/.local/state/reflex/reflex.db. Ignored decisions as per-blueprint counters. See ADR-0001 (no UPDATE path for decision outcomes).",
+    "dependencies": [],
+    "priority": 2
+  },
+  {
+    "id": "R-104",
+    "name": "Decision pipeline core",
+    "description": "Impulse -> rule evaluation -> Activation Decision (ignored/matched/blocked/fired/denied/expired) -> policy (auto/approval/disabled) -> guards (cooldown, run lock skip|buffer, idempotency key) -> Activation Event on mf.{net}.reflex.activation.fired.{target}. Decision audit events on mf.{net}.reflex.activation.decision.{outcome}. Dry Run produces Dry Run Verdict: no guard mutation, no events, not in history. Buffered Impulse re-presented as fresh decision, all guards re-run.",
+    "dependencies": ["R-102", "R-103"],
+    "priority": 3
+  },
+  {
+    "id": "R-105",
+    "name": "Schedule impulse source (cron)",
+    "description": "Internal impulse source: cron expressions with timezone (croner). Drives schedule-kind blueprints.",
+    "dependencies": ["R-104"],
+    "priority": 4
+  },
+  {
+    "id": "R-106",
+    "name": "Manual fire + approval flow",
+    "description": "reflex fire <blueprint-id> --input json produces a manual impulse through the full pipeline (no bypass). Approval lifecycle: Matched Decisions wait; reflex approve/deny <decision-id>; per-blueprint approval_timeout (default 1h) resolves to Expired Decision; deny produces Denied Decision.",
+    "dependencies": ["R-104"],
+    "priority": 4
+  },
+  {
+    "id": "R-107",
+    "name": "CLI over NATS request/reply",
+    "description": "reflex status/list/fire/approve/deny/pending/history/test/validate. Daemon serves mf.{net}.reflex.cmd.> request/reply; CLI is a thin NATS client. Cortex can issue identical commands later.",
+    "dependencies": ["R-101", "R-103"],
+    "priority": 4
+  },
+  {
+    "id": "R-108",
+    "name": "Bus impulse source (subscription + matcher)",
+    "description": "Per-blueprint NATS subject subscriptions; match = subject pattern + flat field-equals conditions on CloudEvents data. No expression language in v0. Also consumes mf.{net}.pulse.run.> outcomes for Run Lock release and Buffered Impulse re-presentation.",
+    "dependencies": ["R-104"],
+    "priority": 5
+  },
+  {
+    "id": "R-109",
+    "name": "Minimal http impulse source",
+    "description": "Localhost HTTP endpoint auto-generated per http-kind blueprint (POST /hook/{blueprint-id}), bearer-token auth only. External impulse source. Windmill pattern, deliberately minimal.",
+    "dependencies": ["R-104"],
+    "priority": 6
+  },
+  {
+    "id": "R-110",
+    "name": "Example activation blueprints",
+    "description": "Three committed examples: F_PR_STATS daily schedule, Pilot 30-min scan (bus + approval), F_TESTING manual impulse. Living docs and integration-test fixtures.",
+    "dependencies": ["R-105", "R-106", "R-108"],
+    "priority": 7
+  }
+]
