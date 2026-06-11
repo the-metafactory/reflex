@@ -85,7 +85,7 @@ wrangler deploy
 
 ## Verification status — honest scope
 
-What the test suite proves: **structure + sync parity + SQL logic**. 38 edge
+What the test suite proves: **structure + sync parity + SQL logic**. 25 edge
 tests under `bun test` (`test/edge/`): D1Repository CAS/batch/single-take
 logic against a D1 shim over bun:sqlite, HTTP auth-before-existence parity,
 cron mapping incl. zero-match warning, KV loading with pagination +
