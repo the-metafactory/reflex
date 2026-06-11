@@ -6,9 +6,9 @@ import {
   installSequence,
   logsInvocation,
   parseStatus,
-  startInvocation,
+  startSequence,
   statusInvocation,
-  stopInvocation,
+  stopSequence,
   uninstallSequence,
   type CommandContext,
   type Invocation,
@@ -89,7 +89,7 @@ export async function serviceCommand(verb: string, options: { follow?: boolean }
       if (!existsSync(unitPath)) {
         return { exitCode: 1, stdout: "", stderr: "not installed — run: reflex service install" };
       }
-      const failure = await execute([verb === "start" ? startInvocation(cmd) : stopInvocation(cmd)]);
+      const failure = await execute(verb === "start" ? startSequence(cmd) : stopSequence(cmd));
       if (failure) return failure;
       return { exitCode: 0, stdout: `${verb}: ok` };
     }

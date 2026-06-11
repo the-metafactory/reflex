@@ -48,16 +48,27 @@ export function uninstallSequence(ctx: CommandContext): Invocation[] {
   ];
 }
 
-export function startInvocation(ctx: CommandContext): Invocation {
-  return ctx.platform === "darwin"
-    ? { argv: ["launchctl", "kickstart", "-k", `gui/${ctx.uid}/${ctx.label}`] }
-    : { argv: ["systemctl", "--user", "start", "reflex"] };
+/**
+ * start/stop under launchd KeepAlive: `launchctl stop` would be resurrected
+ * instantly by KeepAlive, so STOP means bootout (unload; unit file stays)
+ * and START means bootstrap + kickstart (re-load). Verified live: a plain
+ * stop produced a new pid within a second.
+ */
+export function startSequence(ctx: CommandContext): Invocation[] {
+  if (ctx.platform === "darwin") {
+    return [
+      { argv: ["launchctl", "bootstrap", `gui/${ctx.uid}`, ctx.unitPath], allowFail: true }, // already loaded → fine
+      { argv: ["launchctl", "kickstart", "-k", `gui/${ctx.uid}/${ctx.label}`] },
+    ];
+  }
+  return [{ argv: ["systemctl", "--user", "start", "reflex"] }];
 }
 
-export function stopInvocation(ctx: CommandContext): Invocation {
-  return ctx.platform === "darwin"
-    ? { argv: ["launchctl", "stop", ctx.label] }
-    : { argv: ["systemctl", "--user", "stop", "reflex"] };
+export function stopSequence(ctx: CommandContext): Invocation[] {
+  if (ctx.platform === "darwin") {
+    return [{ argv: ["launchctl", "bootout", `gui/${ctx.uid}/${ctx.label}`] }];
+  }
+  return [{ argv: ["systemctl", "--user", "stop", "reflex"] }];
 }
 
 export function statusInvocation(ctx: CommandContext): Invocation {

@@ -4,9 +4,9 @@ import {
   installSequence,
   logsInvocation,
   parseStatus,
-  startInvocation,
+  startSequence,
   statusInvocation,
-  stopInvocation,
+  stopSequence,
   uninstallSequence,
 } from "../../src/service/commands";
 
@@ -32,8 +32,12 @@ describe("darwin sequences", () => {
     expect(uninstallSequence(darwin)).toEqual([
       { argv: ["launchctl", "bootout", "gui/501/ai.meta-factory.reflex"], allowFail: true },
     ]);
-    expect(startInvocation(darwin).argv).toEqual(["launchctl", "kickstart", "-k", "gui/501/ai.meta-factory.reflex"]);
-    expect(stopInvocation(darwin).argv).toEqual(["launchctl", "stop", "ai.meta-factory.reflex"]);
+    // KeepAlive semantics: stop = bootout (unload), start = bootstrap + kickstart
+    expect(startSequence(darwin)).toEqual([
+      { argv: ["launchctl", "bootstrap", "gui/501", "/u/p.plist"], allowFail: true },
+      { argv: ["launchctl", "kickstart", "-k", "gui/501/ai.meta-factory.reflex"] },
+    ]);
+    expect(stopSequence(darwin)).toEqual([{ argv: ["launchctl", "bootout", "gui/501/ai.meta-factory.reflex"] }]);
     expect(statusInvocation(darwin).allowFail).toBe(true);
   });
 });
