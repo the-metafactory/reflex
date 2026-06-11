@@ -6,6 +6,7 @@ import type { ReflexActor } from "../bus/envelopes";
 import type { Command } from "../cmd/protocol";
 import { loadConfig } from "../config/load";
 import type { ReflexConfig } from "../config/schema";
+import { serviceCommand } from "../service/run";
 import { TransportUnreachable, requestCommand } from "./client";
 import { EXIT_DOMAIN, EXIT_OK, EXIT_TRANSPORT, renderResponse, table, type Rendered } from "./render";
 
@@ -219,6 +220,14 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
         ? [`ok — ${validation.blueprints.length} Activation Blueprint(s) valid`]
         : validation.errors.map((e) => `error: ${e.message}`);
       result = { exitCode: validation.ok ? EXIT_OK : EXIT_DOMAIN, stdout: lines.join("\n\n") };
+    });
+
+  program
+    .command("service <verb>")
+    .description("Manage the daemon as a launchd LaunchAgent (macOS) or systemd user unit (Linux).\nExample: reflex service install   (verbs: install|uninstall|start|stop|status|logs)")
+    .option("--follow", "follow logs (logs verb)")
+    .action(async (verb: string, opts: Record<string, unknown>) => {
+      result = await serviceCommand(verb, { follow: Boolean(opts.follow) });
     });
 
   try {

@@ -11,23 +11,39 @@ requireWhenExplicit(up, "stream");
 const cfg = testConfig({ principal: "jc", stack: "itest" });
 
 describe.skipIf(!up)("integration: REFLEX stream ensure", () => {
-  it("creates the stream, and a second run is a no-op", async () => {
+  it("ensure is idempotent; honest no-op when another stack owns the stream", async () => {
     const transport = new NATSTransport({ servers: NATS_URL, name: "reflex-itest-stream" });
-
-    await ensureReflexStream(transport, cfg);
-
-    // Reach into JetStream management to snapshot the stream config.
     const { jetstreamManager } = await import("@nats-io/jetstream");
     const { connect } = await import("@nats-io/transport-node");
     const nc = await connect({ servers: NATS_URL });
     const jsm = await jetstreamManager(nc);
-    const before = await jsm.streams.info(REFLEX_STREAM_NAME);
-    expect(before.config.subjects).toContain(reflexStreamSubjects(cfg)[0]!);
 
-    await ensureReflexStream(transport, cfg); // idempotent re-run
+    // create-if-absent semantics: when a PRODUCTION daemon already owns
+    // REFLEX with another stack's subjects, this test must not fight it
+    // (the multi-stack wrinkle recorded in docs/plan-state.md).
+    let preexisting: string[] | null = null;
+    try {
+      preexisting = (await jsm.streams.info(REFLEX_STREAM_NAME)).config.subjects ?? null;
+    } catch {
+      preexisting = null;
+    }
 
-    const after = await jsm.streams.info(REFLEX_STREAM_NAME);
-    expect(after.config).toEqual(before.config);
+    if (preexisting && !preexisting.includes(reflexStreamSubjects(cfg)[0]!)) {
+      console.warn(
+        `[integration] REFLEX stream owned by another stack (${preexisting.join(",")}) — ` +
+          `verifying ensure is a no-op against it instead of subject membership`,
+      );
+      await ensureReflexStream(transport, cfg); // must not modify or throw
+      const after = await jsm.streams.info(REFLEX_STREAM_NAME);
+      expect(after.config.subjects).toEqual(preexisting);
+    } else {
+      await ensureReflexStream(transport, cfg);
+      const before = await jsm.streams.info(REFLEX_STREAM_NAME);
+      expect(before.config.subjects).toContain(reflexStreamSubjects(cfg)[0]!);
+      await ensureReflexStream(transport, cfg); // idempotent re-run
+      const after = await jsm.streams.info(REFLEX_STREAM_NAME);
+      expect(after.config).toEqual(before.config);
+    }
 
     await nc.close();
     await transport.close();
