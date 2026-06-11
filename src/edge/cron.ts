@@ -53,8 +53,18 @@ export class CronSource {
   async onScheduled(event: { cron: string; scheduledTime: number }): Promise<EvaluateResult[]> {
     const scheduledFor = new Date(event.scheduledTime).toISOString();
     const results: EvaluateResult[] = [];
-    for (const blueprint of this.store.byKind("schedule")) {
-      if (scheduleOf(blueprint) !== event.cron) continue;
+    const matched = this.store.byKind("schedule").filter((b) => scheduleOf(b) === event.cron);
+    if (matched.length === 0) {
+      // Expression equality is STRING equality — "*/5 * * * *" and an
+      // enumerated equivalent never match. Silent non-scheduling is the
+      // failure mode; be loud instead.
+      console.warn(
+        `[reflex-edge-cron] trigger "${event.cron}" matched no schedule blueprint — ` +
+          `blueprint expressions: [${this.expressions().join(", ")}] (string equality; use canonical forms)`,
+      );
+      return results;
+    }
+    for (const blueprint of matched) {
       if (timezoneOf(blueprint)) {
         console.warn(
           `[reflex-edge-cron] ${blueprint.id}: timezone "${timezoneOf(blueprint)}" ignored — Cron Triggers fire in UTC`,

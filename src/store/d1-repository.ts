@@ -132,7 +132,12 @@ export class D1Repository implements RepositoryPort {
   ): Promise<DecisionRow> {
     const stateFor = { approve: "approved", deny: "denied", expire: "expired" } as const;
     // Decision rows are append-only/immutable — reading the matched row
-    // before the batch cannot race anything.
+    // before the batch cannot race anything. CAVEAT (DD-122 verification
+    // item): with D1 read replication enabled this read may hit a stale
+    // replica and MISS a just-created decision, surfacing a spurious
+    // "decision-missing" conflict. Writes always hit primary, so the CAS
+    // itself stays sound. If replication is enabled, pin reads via the D1
+    // Sessions API or retry the read once on miss.
     const matched = await this.db.select().from(decisions).where(eq(decisions.id, matchedId)).get();
     if (!matched) throw new ConflictError(matchedId, "decision-missing");
 
@@ -303,6 +308,9 @@ export class D1Repository implements RepositoryPort {
    * Single-taker without a transaction: clear ONLY the exact JSON value
    * that was read (value-conditioned CAS). A concurrent taker or a newer
    * buffered impulse makes `meta.changes` 0 → this caller gets null.
+   * The UPDATE is a single atomic statement, so two takers cannot both
+   * see changes=1; a stale-replica read fails in the SAFE direction
+   * (reads a value that is already gone → UPDATE matches 0 rows → null).
    */
   async takeBufferedImpulse(
     blueprintId: string,

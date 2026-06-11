@@ -70,18 +70,37 @@ wrangler deploy
   keep-alive. Hibernation needs DO-native WebSockets — incompatible with a
   client library's socket. Revisit post-v0.
 - **token_env names a secret BINDING** on the Worker, not a process env var.
-- **Bundle carries dead `@nats-io/transport-node` code**: the myelin root
+- **Blueprint staleness window** = alarm period (5 min) + KV propagation
+  (eventually consistent, up to ~60s) — nothing in Reflex assumes fresher.
+- **DO eviction (deploy/restart) drops in-memory subscriptions** until the
+  next event wakes the DO and re-subscribes. JetStream durable consumers
+  bound the damage: missed envelopes redeliver on resubscribe — degraded
+  latency, not message loss.
+- **Bundle carries dormant `@nats-io/transport-node` code**: the myelin root
   barrel re-exports `NATSTransport` (CJS dep — not tree-shakeable). It never
   executes on edge (the WS transport is injected), `nodejs_compat` satisfies
   its module-load imports, and the bundle stays well under limits (~290 KB
   gzip). A myelin follow-up for edge-safe envelope/middleware subpaths would
   remove it.
 
-## Verification status
+## Verification status — honest scope
 
-Everything testable without a Cloudflare account is tested under `bun test`
-(`test/edge/`): D1 CAS semantics against a D1 shim over bun:sqlite, HTTP
-auth-before-existence parity, cron expression mapping, KV loading with
-pagination + duplicate-id errors. `wrangler deploy --dry-run` proves the
-bundle. **Not yet exercised live**: workerd runtime, real D1, the WS
-connection from a DO — first live exercise is gated on DD-122 follow-ups.
+What the test suite proves: **structure + sync parity + SQL logic**. 38 edge
+tests under `bun test` (`test/edge/`): D1Repository CAS/batch/single-take
+logic against a D1 shim over bun:sqlite, HTTP auth-before-existence parity,
+cron mapping incl. zero-match warning, KV loading with pagination +
+duplicate-id errors. `wrangler deploy --dry-run` proves the worker
+**compiles and bundles** — not that it instantiates or runs.
+
+What is NOT yet verified (live-runtime items, blocked on DD-122 follow-ups
+before any meaningful traffic exists to test with):
+
+- workerd instantiation (dormant transport-node module-load under
+  `nodejs_compat`)
+- real D1: concurrent CAS under contention, read-replica staleness
+  (resolveMatched's pre-read can spuriously miss a fresh decision on a
+  replica — pin via Sessions API or retry; noted in code), error taxonomy
+- the WS connection lifecycle from a DO (reconnect, eviction, alarm retry)
+- await-interleaving inside the DO: per-blueprint serialization
+  (Pipeline.chains) and BusSource's single-flight sync guard the known
+  cross-await invariants, but this is analyzed, not load-tested.
