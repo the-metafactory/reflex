@@ -216,7 +216,7 @@ describe("scenario 5: dry run mutates nothing", () => {
     const guardBefore = JSON.stringify(repo.getGuardState("bp"));
     const publishedBefore = published.length;
 
-    const verdict = pipeline.evaluateDry(impulse({ payload: { n: 9 } }));
+    const verdict = await pipeline.evaluateDry(impulse({ payload: { n: 9 } }));
     expect(verdict.wouldOutcome).toBe("blocked");
     expect(verdict.reasons[0]).toContain("cooldown until");
 

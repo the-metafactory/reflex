@@ -2,14 +2,14 @@ import type { ActivationBlueprint } from "../activation/types";
 import type { BlueprintStore } from "../activation/store";
 import type { ReflexBus } from "../bus";
 import type { ReflexActor } from "../bus/envelopes";
-import type { Repository } from "../store/repository";
+import type { RepositoryPort } from "../store/port";
 import { checkGuards } from "./guards";
 import { IDEMPOTENCY_WINDOW_MS, type EvaluateResult, type Impulse } from "./impulse";
 import type { DryRunVerdict } from "./verdict";
 
 export interface PipelineOptions {
   store: BlueprintStore;
-  repo: Repository;
+  repo: RepositoryPort;
   bus: ReflexBus;
   /** Injected clock for determinism (NFR-3). Default: real time. */
   nowFn?: () => string;
@@ -23,7 +23,7 @@ export interface PipelineOptions {
  */
 export class Pipeline {
   private readonly store: BlueprintStore;
-  private readonly repo: Repository;
+  private readonly repo: RepositoryPort;
   private readonly bus: ReflexBus;
   private readonly nowFn: () => string;
   /** Per-blueprint serialization: concurrent evaluations for ONE blueprint queue (NFR-2). */
@@ -46,23 +46,23 @@ export class Pipeline {
     if (!blueprint || blueprint.kind !== impulse.kind) {
       // No-match ignores are counted too — every ignored evaluation is
       // visible in counters (sage R-104 cycle-2 finding).
-      this.repo.bumpIgnored(impulse.blueprintId, now.slice(0, 10));
+      await this.repo.bumpIgnored(impulse.blueprintId, now.slice(0, 10));
       return { outcome: "ignored", reason: "no-match" };
     }
     if (blueprint.policy === "disabled") {
-      this.repo.bumpIgnored(blueprint.id, now.slice(0, 10));
+      await this.repo.bumpIgnored(blueprint.id, now.slice(0, 10));
       return { outcome: "ignored", reason: "disabled" };
     }
 
     if (blueprint.policy === "approval") {
-      const decision = this.repo.recordDecision({
+      const decision = await this.repo.recordDecision({
         blueprintId: blueprint.id,
         outcome: "matched",
         impulse: snapshot(impulse),
         correlationId: impulse.sourceEnvelope?.correlationId,
       });
       const expiresAt = new Date(Date.parse(now) + blueprint.approvalTimeoutMs).toISOString();
-      this.repo.createApproval(decision.id, expiresAt);
+      await this.repo.createApproval(decision.id, expiresAt);
       await this.bus.publishDecision({
         outcome: "matched",
         blueprintId: blueprint.id,
@@ -83,9 +83,9 @@ export class Pipeline {
     now: string,
     causationId: string | undefined,
   ): Promise<EvaluateResult> {
-    const check = checkGuards(blueprint, impulse, this.repo, now);
+    const check = await checkGuards(blueprint, impulse, this.repo, now);
     if (!check.pass) {
-      const decision = this.repo.recordDecision({
+      const decision = await this.repo.recordDecision({
         blueprintId: blueprint.id,
         outcome: "blocked",
         impulse: snapshot(impulse),
@@ -94,7 +94,7 @@ export class Pipeline {
         correlationId: impulse.sourceEnvelope?.correlationId,
       });
       if (check.reason === "run-lock-buffered") {
-        this.repo.putBufferedImpulse(blueprint.id, snapshot(impulse), decision.id);
+        await this.repo.putBufferedImpulse(blueprint.id, snapshot(impulse), decision.id);
       }
       await this.bus.publishDecision({
         outcome: "blocked",
@@ -110,7 +110,7 @@ export class Pipeline {
     // FIRE PATH — order matters (plan FR-7, fail closed FR-11):
     // 1. persist the Fired Decision (the truth)
     const correlationId = crypto.randomUUID();
-    const decision = this.repo.recordDecision({
+    const decision = await this.repo.recordDecision({
       blueprintId: blueprint.id,
       outcome: "fired",
       impulse: snapshot(impulse),
@@ -118,19 +118,19 @@ export class Pipeline {
       correlationId,
     });
     // 2. engage guards
-    this.repo.putIdempotencyKey(
+    await this.repo.putIdempotencyKey(
       blueprint.id,
       check.idempotencyKey,
       new Date(Date.parse(now) + IDEMPOTENCY_WINDOW_MS).toISOString(),
     );
     if (blueprint.guards.cooldownMs !== undefined) {
-      this.repo.setCooldown(blueprint.id, new Date(Date.parse(now) + blueprint.guards.cooldownMs).toISOString());
+      await this.repo.setCooldown(blueprint.id, new Date(Date.parse(now) + blueprint.guards.cooldownMs).toISOString());
     }
     if (blueprint.guards.runLock !== undefined) {
-      this.repo.acquireRunLock(blueprint.id, correlationId, now);
+      await this.repo.acquireRunLock(blueprint.id, correlationId, now);
     }
     // 3. record the event row (history + buffer matching)
-    this.repo.recordFiredEvent({
+    await this.repo.recordFiredEvent({
       decisionId: decision.id,
       // Honest null: myelin assigns the envelope id inside the transport and
       // does not expose it to publishers; correlation_id is the join key.
@@ -177,12 +177,12 @@ export class Pipeline {
     action: "approve" | "deny",
     actor: ReflexActor,
   ): Promise<EvaluateResult | { outcome: "denied"; decisionId: string }> {
-    const matched = this.repo.getDecision(decisionId);
+    const matched = await this.repo.getDecision(decisionId);
     if (!matched) throw new Error(`Decision ${decisionId} not found`);
 
     if (action === "deny") {
       const now = this.nowFn();
-      const resolution = this.repo.resolveMatched(decisionId, {
+      const resolution = await this.repo.resolveMatched(decisionId, {
         kind: "deny",
         resolutionOutcome: "denied",
         actor,
@@ -205,7 +205,7 @@ export class Pipeline {
       const now = this.nowFn();
       const blueprint = this.store.get(matched.blueprintId);
       if (!blueprint) {
-        this.repo.resolveMatched(decisionId, {
+        await this.repo.resolveMatched(decisionId, {
           kind: "expire",
           resolutionOutcome: "expired",
           reason: "blueprint-removed",
@@ -216,7 +216,7 @@ export class Pipeline {
       // CAS to approved first (exactly one resolver wins), then run the
       // honest guards+fire path — its Fired OR Blocked row links the matched
       // decision via causation (spec edge: cooldown engaged since match).
-      this.repo.approveWaiting(decisionId, actor, now);
+      await this.repo.approveWaiting(decisionId, actor, now);
       const impulse = impulseFromSnapshot(matched.impulse, matched.blueprintId, actor);
       return this.guardsAndFire(blueprint, impulse, now, decisionId);
     });
@@ -227,21 +227,21 @@ export class Pipeline {
    * R-108 when a terminal run outcome arrives for a correlation we stamped.
    */
   async onRunCompleted(correlationId: string, _outcome: string): Promise<EvaluateResult | null> {
-    const fired = this.repo.findFiredByCorrelation(correlationId);
+    const fired = await this.repo.findFiredByCorrelation(correlationId);
     if (!fired) {
       console.warn(`[reflex-pipeline] run outcome for unknown correlation ${correlationId} — ignoring`);
       return null;
     }
-    const decision = this.repo.getDecision(fired.decisionId);
+    const decision = await this.repo.getDecision(fired.decisionId);
     if (!decision) return null;
     const blueprintId = decision.blueprintId;
-    this.repo.releaseRunLock(blueprintId, correlationId);
+    await this.repo.releaseRunLock(blueprintId, correlationId);
     // Blueprint checked BEFORE consuming the buffer: a hot-reload-removed
     // blueprint must not silently swallow the impulse (sage cycle-2 finding)
     // — the orphaned buffer is discarded LOUDLY.
     const blueprint = this.store.get(blueprintId);
     if (!blueprint) {
-      const orphan = this.repo.takeBufferedImpulse(blueprintId);
+      const orphan = await this.repo.takeBufferedImpulse(blueprintId);
       if (orphan) {
         console.warn(
           `[reflex-pipeline] discarding Buffered Impulse for removed blueprint ${blueprintId} ` +
@@ -250,7 +250,7 @@ export class Pipeline {
       }
       return null;
     }
-    const buffered = this.repo.takeBufferedImpulse(blueprintId);
+    const buffered = await this.repo.takeBufferedImpulse(blueprintId);
     if (!buffered) return null;
     const impulse = impulseFromSnapshot(buffered.impulse, blueprintId, { type: "system", id: "reflex-buffer" });
     return this.serialized(blueprintId, () =>
@@ -259,7 +259,7 @@ export class Pipeline {
   }
 
   /** Dry Run Verdict (FR-9): full prediction, zero writes, zero publishes. */
-  evaluateDry(impulse: Impulse): DryRunVerdict {
+  async evaluateDry(impulse: Impulse): Promise<DryRunVerdict> {
     const now = this.nowFn();
     const blueprint = this.store.get(impulse.blueprintId);
     if (!blueprint || blueprint.kind !== impulse.kind) {
@@ -271,7 +271,7 @@ export class Pipeline {
     if (blueprint.policy === "approval") {
       return { wouldOutcome: "matched", reasons: [`would wait for approval (timeout ${blueprint.approvalTimeoutMs}ms)`] };
     }
-    const check = checkGuards(blueprint, impulse, this.repo, now);
+    const check = await checkGuards(blueprint, impulse, this.repo, now);
     if (!check.pass) {
       return { wouldOutcome: "blocked", reasons: [`would block: ${check.detail}`] };
     }

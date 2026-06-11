@@ -2,6 +2,7 @@ import { Command as Commander } from "commander";
 import { userInfo } from "node:os";
 import { validatePaths } from "../activation/validate-cli";
 import { createReflexBus, type ReflexBus } from "../bus";
+import { buildNatsTransport } from "../bus/nats-transport";
 import type { ReflexActor } from "../bus/envelopes";
 import type { Command } from "../cmd/protocol";
 import { loadConfig } from "../config/load";
@@ -32,7 +33,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
       const json = Boolean(opts.json);
       const timeout = Number(opts.timeout ?? 3000);
       const cfg = io.cfg ?? loadConfig();
-      const bus = (io.makeBus ?? ((c: ReflexConfig) => createReflexBus(c)))(cfg);
+      const bus = (io.makeBus ?? ((c: ReflexConfig) => createReflexBus(c, { transport: buildNatsTransport(c) })))(cfg);
       try {
         const response = await requestCommand(bus, cfg, command, argsOf(positionalArgs(cliArgs, opts)), operatorActor(), timeout);
         result = renderResponse(response, { json, human });

@@ -2,6 +2,7 @@ import { ActivationWatcher } from "./activation/watcher";
 import { discoverActivationFiles } from "./activation/sources";
 import { BlueprintStore, loadBlueprintSet } from "./activation/store";
 import { createReflexBus, type ReflexBus } from "./bus";
+import { buildNatsTransport } from "./bus/nats-transport";
 import { ensureReflexStream } from "./bus/stream";
 import type { ReflexConfig } from "./config/schema";
 import { CommandRouter } from "./cmd/router";
@@ -70,7 +71,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
   const store = new BlueprintStore(await loadBlueprintSet(await discoverActivationFiles(sources)));
   const watcher = new ActivationWatcher(store, sources);
 
-  bus = options.bus ?? createReflexBus(cfg);
+  bus = options.bus ?? createReflexBus(cfg, { transport: buildNatsTransport(cfg) });
   await ensureReflexStream(bus.raw, cfg);
 
   const pipeline = new Pipeline({ store, repo, bus });

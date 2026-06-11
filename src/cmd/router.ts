@@ -156,7 +156,7 @@ export class CommandRouter {
           receivedAt: new Date().toISOString(),
           actor,
         };
-        return { ok: true, data: pipeline.evaluateDry(impulse) };
+        return { ok: true, data: await pipeline.evaluateDry(impulse) };
       }
       case "status": {
         const blueprints = store.current();

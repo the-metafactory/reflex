@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#f5ec8658030e2fc185f123b06d8bf94d9f74cd84",
+    "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#f8325f60af39a3e6f4a6c40117cb3263802427a0",
     "commander": "^15.0.0",
     "croner": "^10.0.1",
     "drizzle-orm": "^0.45.2",
@@ -18,9 +18,11 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260611.1",
     "@types/bun": "latest",
     "drizzle-kit": "^0.31.10",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "wrangler": "^4.99.0"
   },
   "bin": {
     "reflex": "./src/bin/reflex.ts",

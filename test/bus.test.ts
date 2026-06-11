@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { createTransport } from "@the-metafactory/myelin";
 import { createReflexBus } from "../src/bus";
+import { buildNatsTransport } from "../src/bus/nats-transport";
 import { ACTIVATION_FIRED_TYPE } from "../src/bus/envelopes";
 import { testConfig } from "./helpers";
 
@@ -156,15 +157,19 @@ describe("ReflexBus", () => {
 
   it("fails fast on nats transport with missing creds file", () => {
     expect(() =>
-      createReflexBus(testConfig({ nats: { url: "nats://127.0.0.1:4222", creds: "/tmp/definitely-missing.creds", insecure: false } })),
+      buildNatsTransport(testConfig({ nats: { url: "nats://127.0.0.1:4222", creds: "/tmp/definitely-missing.creds", insecure: false } })),
     ).toThrow(/definitely-missing\.creds/);
+  });
+
+  it("createReflexBus refuses to construct without an injected transport (reflex#15)", () => {
+    expect(() => createReflexBus(testConfig({}))).toThrow(/options\.transport is required/);
   });
 });
 
 describe("nats.insecure boundary", () => {
   it("loopback-only: a remote URL with insecure=true throws", () => {
     expect(() =>
-      createReflexBus(
+      buildNatsTransport(
         testConfig({ nats: { url: "nats://bus.example.com:4222", creds: "/x", insecure: true } }),
       ),
     ).toThrow(/loopback-only/);

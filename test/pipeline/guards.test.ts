@@ -31,28 +31,28 @@ function repo() {
 }
 
 describe("checkGuards", () => {
-  it("passes with no guards configured and no state", () => {
+  it("passes with no guards configured and no state", async () => {
     const { r, close } = repo();
-    const result = checkGuards(bp({}), impulse(), r, NOW);
+    const result = await checkGuards(bp({}), impulse(), r, NOW);
     expect(result.pass).toBe(true);
     close();
   });
 
-  it("idempotency wins over cooldown (fixed order)", () => {
+  it("idempotency wins over cooldown (fixed order)", async () => {
     const { r, close } = repo();
-    const key = deriveIdempotencyKey("bp", { n: 1 });
+    const key = await deriveIdempotencyKey("bp", { n: 1 });
     r.putIdempotencyKey("bp", key, "2026-06-10T12:30:00Z");
     r.setCooldown("bp", "2026-06-10T18:00:00Z");
-    const result = checkGuards(bp({ cooldownMs: 60_000 }), impulse(), r, NOW);
+    const result = await checkGuards(bp({ cooldownMs: 60_000 }), impulse(), r, NOW);
     expect(result.pass).toBe(false);
     if (!result.pass) expect(result.reason).toBe("idempotency");
     close();
   });
 
-  it("cooldown blocks with expiry detail", () => {
+  it("cooldown blocks with expiry detail", async () => {
     const { r, close } = repo();
     r.setCooldown("bp", "2026-06-10T18:00:00Z");
-    const result = checkGuards(bp({ cooldownMs: 60_000 }), impulse(), r, NOW);
+    const result = await checkGuards(bp({ cooldownMs: 60_000 }), impulse(), r, NOW);
     expect(result.pass).toBe(false);
     if (!result.pass) {
       expect(result.reason).toBe("cooldown");
@@ -61,28 +61,28 @@ describe("checkGuards", () => {
     close();
   });
 
-  it("cooldown state is ignored when blueprint declares no cooldown guard", () => {
+  it("cooldown state is ignored when blueprint declares no cooldown guard", async () => {
     const { r, close } = repo();
     r.setCooldown("bp", "2026-06-10T18:00:00Z");
-    expect(checkGuards(bp({}), impulse(), r, NOW).pass).toBe(true);
+    expect((await checkGuards(bp({}), impulse(), r, NOW)).pass).toBe(true);
     close();
   });
 
-  it("run lock skip vs buffer produce distinct reasons", () => {
+  it("run lock skip vs buffer produce distinct reasons", async () => {
     const { r, close } = repo();
     r.acquireRunLock("bp", "corr-1", NOW);
-    const skip = checkGuards(bp({ runLock: "skip" }), impulse(), r, NOW);
-    const buffer = checkGuards(bp({ runLock: "buffer" }), impulse(), r, NOW);
+    const skip = await checkGuards(bp({ runLock: "skip" }), impulse(), r, NOW);
+    const buffer = await checkGuards(bp({ runLock: "buffer" }), impulse(), r, NOW);
     expect(!skip.pass && skip.reason).toBe("run-lock");
     expect(!buffer.pass && buffer.reason).toBe("run-lock-buffered");
     close();
   });
 
-  it("is read-only: checking never mutates guard state", () => {
+  it("is read-only: checking never mutates guard state", async () => {
     const { r, close } = repo();
-    checkGuards(bp({ cooldownMs: 60_000, runLock: "skip" }), impulse(), r, NOW);
+    await checkGuards(bp({ cooldownMs: 60_000, runLock: "skip" }), impulse(), r, NOW);
     expect(r.getGuardState("bp")).toBeNull();
-    expect(r.hasIdempotencyKey("bp", deriveIdempotencyKey("bp", { n: 1 }), NOW)).toBe(false);
+    expect(r.hasIdempotencyKey("bp", await deriveIdempotencyKey("bp", { n: 1 }), NOW)).toBe(false);
     close();
   });
 });

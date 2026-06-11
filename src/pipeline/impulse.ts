@@ -42,12 +42,25 @@ function canonicalJson(value: unknown): string {
 /**
  * Idempotency Key (CONTEXT.md): stable identity deduplicating equivalent
  * activations — hash of blueprint id + canonical payload.
+ *
+ * Async since reflex#15: Cloudflare Workers have no Bun.CryptoHasher and
+ * Web Crypto's digest is promise-only. On Bun the fast sync hasher still
+ * runs; the promise wrapper costs one microtask. Streaming update(a) +
+ * update(b) equals hashing the concatenation, so both paths produce the
+ * same digest as the pre-#15 implementation.
  */
-export function deriveIdempotencyKey(blueprintId: string, payload: Record<string, unknown>): string {
-  const hasher = new Bun.CryptoHasher("sha256");
-  hasher.update(blueprintId);
-  hasher.update(canonicalJson(payload));
-  return hasher.digest("hex");
+export async function deriveIdempotencyKey(
+  blueprintId: string,
+  payload: Record<string, unknown>,
+): Promise<string> {
+  const material = blueprintId + canonicalJson(payload);
+  if (typeof Bun !== "undefined") {
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(material);
+    return hasher.digest("hex");
+  }
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Dedup window: DD-71 Stage-4 precedent (10 minutes). Constant in v0. */
