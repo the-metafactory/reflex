@@ -4,7 +4,7 @@ import type { ActivationBlueprint, BusWhen } from "../activation/types";
 import type { ReflexBus } from "../bus";
 import type { ReflexConfig } from "../config/schema";
 import type { EvaluateResult, Impulse } from "../pipeline/impulse";
-import type { Repository } from "../store/repository";
+import type { RepositoryPort } from "../store/port";
 import { runOutcomeSubject, terminalOutcomeOf } from "./run-outcome";
 
 /** Pipeline slice the bus source needs — injectable for tests. */
@@ -45,14 +45,14 @@ export class BusSource {
     private readonly store: BlueprintStore,
     private readonly bus: ReflexBus,
     private readonly sink: BusSink,
-    private readonly repo: Repository,
+    private readonly repo: RepositoryPort,
   ) {
     this.ownFiredSubject = `local.${cfg.principal}.${cfg.stack}.reflex.activation.fired`;
   }
 
   async start(): Promise<void> {
     await this.sync();
-    this.flushTimer = setInterval(() => this.flushIgnored(), 5_000);
+    this.flushTimer = setInterval(() => void this.flushIgnored(), 5_000);
     this.outcomeSub = await this.bus.subscribe(runOutcomeSubject(this.cfg), async (envelope) => {
       const outcome = terminalOutcomeOf(envelope.type);
       if (!outcome || !envelope.correlation_id) return;
@@ -68,7 +68,7 @@ export class BusSource {
     await this.syncChain;
     if (this.flushTimer) clearInterval(this.flushTimer);
     this.flushTimer = null;
-    this.flushIgnored();
+    await this.flushIgnored();
     for (const sub of this.subscriptions.values()) await sub.unsubscribe();
     this.subscriptions.clear();
     if (this.outcomeSub) await this.outcomeSub.unsubscribe();
@@ -164,12 +164,12 @@ export class BusSource {
   /** Coalesced flush of buffered ignored counts (one write per blueprint/day).
    * Failed writes KEEP their counts buffered for the next flush — a transient
    * storage error never loses counter data (sage R-108 cycle-2 finding). */
-  flushIgnored(): void {
+  async flushIgnored(): Promise<void> {
     if (this.ignoredBuffer.size === 0) return;
     const day = new Date().toISOString().slice(0, 10);
     for (const [blueprintId, count] of [...this.ignoredBuffer]) {
       try {
-        this.repo.bumpIgnoredBy(blueprintId, day, count);
+        await this.repo.bumpIgnoredBy(blueprintId, day, count);
         const current = this.ignoredBuffer.get(blueprintId) ?? 0;
         if (current > count) this.ignoredBuffer.set(blueprintId, current - count);
         else this.ignoredBuffer.delete(blueprintId);
