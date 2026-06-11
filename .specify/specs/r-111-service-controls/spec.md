@@ -19,7 +19,7 @@ Primary: the operator on this laptop (launchd, immediate need). Secondary: futur
 | FR-1 | `reflex service install` renders + installs the platform unit: macOS → `~/Library/LaunchAgents/ai.meta-factory.reflex.plist` (RunAtLoad, KeepAlive, logs `~/.config/reflex/logs/reflex.log`/`.error.log`, env HOME+PATH, WorkingDirectory = repo root, ProgramArguments = resolved bun + absolute `src/bin/reflex-daemon.ts`); Linux → `~/.config/systemd/user/reflex.service` (Restart=always, RestartSec=2, journal) |
 | FR-2 | `install` activates: `launchctl bootstrap gui/$UID <plist>` (+ `kickstart` if already loaded → `bootout` first, idempotent reinstall); Linux: `systemctl --user daemon-reload && systemctl --user enable --now reflex` |
 | FR-3 | `uninstall` deactivates + removes the unit file (`bootout` / `disable --now` + rm); idempotent when absent |
-| FR-4 | `start` / `stop`: `launchctl kickstart -k` / `launchctl stop` (Linux: `systemctl --user start/stop`) |
+| FR-4 | `start` / `stop` with KeepAlive-correct semantics: stop = `launchctl bootout` (unit file stays; a plain `launchctl stop` is resurrected instantly by KeepAlive — observed live), start = `bootstrap` + `kickstart -k` (Linux: `systemctl --user start/stop`) |
 | FR-5 | `status`: unit installed? loaded/running (launchctl print / systemctl is-active) + last 5 log lines; exit 0 running, 1 not |
 | FR-6 | `logs [--follow]`: tail the launchd log files / `journalctl --user -u reflex` |
 | FR-7 | Renderers are pure functions over `{bunPath, daemonScript, workingDir, home, logsDir}` — fully unit-testable; command builders return argv arrays (no string-shell interpolation) |

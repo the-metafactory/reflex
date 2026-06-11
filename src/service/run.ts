@@ -113,8 +113,12 @@ export async function serviceCommand(verb: string, options: { follow?: boolean }
       }
       const errLog = join(logsDir, "reflex.error.log");
       if (cmd.platform === "darwin" && existsSync(errLog)) {
-        const tail = readFileSync(errLog, "utf-8").trimEnd().split("\n").slice(-5);
-        if (tail.length > 0 && tail[0] !== "") lines.push("--- last error-log lines ---", ...tail);
+        // Bounded: crash loops under KeepAlive grow this file without bound —
+        // never read it whole (sage R-111 finding).
+        const proc = Bun.spawn(["tail", "-n", "5", errLog], { stdout: "pipe", stderr: "ignore" });
+        const tailText = (await new Response(proc.stdout).text()).trimEnd();
+        await proc.exited;
+        if (tailText !== "") lines.push("--- last error-log lines ---", ...tailText.split("\n"));
       }
       return { exitCode: state.running ? 0 : 1, stdout: lines.join("\n") };
     }

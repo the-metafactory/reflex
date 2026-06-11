@@ -1,0 +1,21 @@
+Live launchd verification on this machine (captured 2026-06-11; INSECURE warnings elided):
+
+$ reflex service install
+installed + started ai.meta-factory.reflex
+unit: /Users/fischer/Library/LaunchAgents/ai.meta-factory.reflex.plist
+logs: /Users/fischer/.config/reflex/logs
+$ reflex service status
+ai.meta-factory.reflex: running (pid 42710)
+$ reflex status                      # CLI round-trip over NATS against the supervised daemon
+reflex-daemon 0.1.0 (instance 292c2d06)
+blueprints: 1 (manual: 1)
+$ reflex service stop                # bootout (KeepAlive-correct; a plain launchctl stop was resurrected with a new pid within 1s — drove the semantics fix)
+stop: ok
+$ reflex service status
+ai.meta-factory.reflex: installed, not running — run: reflex service start
+$ reflex service start
+start: ok
+$ reflex service status
+ai.meta-factory.reflex: running (pid 44454)
+$ reflex fire f-testing --input '{"smoke":"launchd-final"}'
+fired (decision dfab6f0b-7b18-457d-9e7c-c205eb27679a)
