@@ -37,7 +37,9 @@ describe("darwin sequences", () => {
       { argv: ["launchctl", "bootstrap", "gui/501", "/u/p.plist"], allowFail: true },
       { argv: ["launchctl", "kickstart", "-k", "gui/501/ai.meta-factory.reflex"] },
     ]);
-    expect(stopSequence(darwin)).toEqual([{ argv: ["launchctl", "bootout", "gui/501/ai.meta-factory.reflex"] }]);
+    expect(stopSequence(darwin)).toEqual([
+      { argv: ["launchctl", "bootout", "gui/501/ai.meta-factory.reflex"], allowFail: true },
+    ]);
     expect(statusInvocation(darwin).allowFail).toBe(true);
   });
 });

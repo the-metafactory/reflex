@@ -66,7 +66,9 @@ export function startSequence(ctx: CommandContext): Invocation[] {
 
 export function stopSequence(ctx: CommandContext): Invocation[] {
   if (ctx.platform === "darwin") {
-    return [{ argv: ["launchctl", "bootout", `gui/${ctx.uid}/${ctx.label}`] }];
+    // allowFail: stop means "ensure stopped" — a second stop on an already
+    // booted-out service succeeds idempotently (sage R-111 cycle-2).
+    return [{ argv: ["launchctl", "bootout", `gui/${ctx.uid}/${ctx.label}`], allowFail: true }];
   }
   return [{ argv: ["systemctl", "--user", "stop", "reflex"] }];
 }

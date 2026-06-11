@@ -66,13 +66,15 @@ export async function serviceCommand(verb: string, options: { follow?: boolean }
 
   switch (verb) {
     case "install": {
-      mkdirSync(logsDir, { recursive: true, mode: 0o700 });
-      mkdirSync(join(unitPath, ".."), { recursive: true });
       const content = cmd.platform === "darwin" ? renderLaunchdPlist(unit) : renderSystemdUnit(unit);
+      // One guarded block for ALL filesystem effects: an unwritable target
+      // returns the documented result, never an escaped rejection.
       try {
+        mkdirSync(logsDir, { recursive: true, mode: 0o700 });
+        mkdirSync(join(unitPath, ".."), { recursive: true });
         writeFileSync(unitPath, content, { mode: 0o644 });
       } catch (error) {
-        return { exitCode: 1, stdout: "", stderr: `${(error as Error).message} (${unitPath})` };
+        return { exitCode: 1, stdout: "", stderr: `${(error as Error).message} (target: ${unitPath})` };
       }
       const failure = await execute(installSequence(cmd));
       if (failure) return failure;
@@ -110,6 +112,16 @@ export async function serviceCommand(verb: string, options: { follow?: boolean }
       const recordedBun = recorded?.[1] ?? recorded?.[2];
       if (recordedBun && !existsSync(recordedBun)) {
         lines.push(`warning: unit references missing bun at ${recordedBun} — run: reflex service install`);
+      }
+      if (cmd.platform === "linux") {
+        // Spec FR-5 promises last log lines on BOTH platforms.
+        const journal = Bun.spawn(["journalctl", "--user", "-u", "reflex", "-n", "5", "--no-pager"], {
+          stdout: "pipe",
+          stderr: "ignore",
+        });
+        const text = (await new Response(journal.stdout).text()).trimEnd();
+        await journal.exited;
+        if (text !== "") lines.push("--- last journal lines ---", ...text.split("\n"));
       }
       const errLog = join(logsDir, "reflex.error.log");
       if (cmd.platform === "darwin" && existsSync(errLog)) {

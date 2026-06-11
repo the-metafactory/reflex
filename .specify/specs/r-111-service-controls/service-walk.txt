@@ -19,3 +19,17 @@ $ reflex service status
 ai.meta-factory.reflex: running (pid 44454)
 $ reflex fire f-testing --input '{"smoke":"launchd-final"}'
 fired (decision dfab6f0b-7b18-457d-9e7c-c205eb27679a)
+
+Cycle-2 additions (captured 2026-06-11):
+
+$ reflex service stop && reflex service stop      # idempotent — second stop on a stopped service succeeds
+stop: ok
+stop: ok
+$ reflex service start
+start: ok
+$ kill -9 65698                                   # crash the supervised daemon
+(wait ~12s — KeepAlive throttle)
+$ reflex service status
+ai.meta-factory.reflex: running (pid 65758)       # launchd resurrected it — crash-restart PROVEN live
+
+NOT proven (declared by unit config only): reboot survival (RunAtLoad) — verifying would reboot the workstation.
