@@ -87,7 +87,7 @@ features:
   # Iteration 2 — operational hardening
   - id: R-111
     name: "Service controls (launchd + systemd)"
-    status: planned
+    status: done
     iteration: 2
     depends: [R-105]
     description: "reflex service install|uninstall|start|stop|status|logs — renders a launchd LaunchAgent (macOS, ai.meta-factory.reflex, RunAtLoad+KeepAlive, logs under ~/.config/reflex/logs) or a systemd user unit (Linux, Restart=always, journal) from the resolved bun + repo paths, and drives launchctl/systemctl. Pure renderers + command builders unit-tested; live launchd verified on this machine."
