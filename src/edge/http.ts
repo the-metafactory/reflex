@@ -61,31 +61,8 @@ export class EdgeHttpSource {
     if (request.method !== "POST") return json(405, { error: "POST only" });
     const blueprintId = match[1]!;
 
-    // AUTH FIRST (R-109 FR-6): resolve the expected token only if the
-    // blueprint exists; otherwise compare against nothing and 401 —
-    // existence is never observable without a valid token.
-    const presented = bearerOf(request);
-    const blueprint = this.store.get(blueprintId);
-    const tokenBinding =
-      blueprint && blueprint.kind === "http" ? (blueprint.when as HttpWhen).http.token_env : undefined;
-    const expectedRaw = tokenBinding ? this.secrets[tokenBinding] : undefined;
-    const expected = typeof expectedRaw === "string" ? expectedRaw : undefined;
-
-    if (blueprint && blueprint.kind === "http" && tokenBinding && expected === undefined) {
-      if (!this.misconfigWarned.has(blueprintId)) {
-        this.misconfigWarned.add(blueprintId);
-        console.error(`[reflex-edge-http] ${blueprintId}: secret binding ${tokenBinding} is unset — route disabled (503)`);
-      }
-      return json(503, { error: "route misconfigured — see worker log" });
-    }
-    if (!presented || !expected || !constantTimeEquals(presented, expected)) {
-      return json(401, { error: "unauthorized" });
-    }
-    if (!blueprint || blueprint.kind !== "http") {
-      this.buckets.delete(blueprintId);
-      this.misconfigWarned.delete(blueprintId);
-      return json(404, { error: `no http Activation Blueprint "${blueprintId}" loaded` });
-    }
+    const authed = this.authorize(request, blueprintId);
+    if (authed !== "ok") return authed;
 
     if (!this.takeToken(blueprintId)) {
       const retryAfter = Math.ceil(60 / this.rateLimit);
@@ -95,21 +72,9 @@ export class EdgeHttpSource {
       });
     }
 
-    if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
-      return json(415, { error: "content-type must be application/json" });
-    }
-    const declared = Number(request.headers.get("content-length") ?? 0);
-    if (declared > MAX_BODY_BYTES) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
-    const raw = await readBounded(request, MAX_BODY_BYTES);
-    if (raw === null) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
-    let payload: Record<string, unknown>;
-    try {
-      const parsed = JSON.parse(raw === "" ? "{}" : raw);
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not an object");
-      payload = parsed as Record<string, unknown>;
-    } catch {
-      return json(422, { error: "body must be a JSON object" });
-    }
+    const parsed = await this.parseJsonBody(request);
+    if (parsed instanceof Response) return parsed;
+    const payload = parsed;
 
     const impulse: Impulse = {
       kind: "http",
@@ -128,6 +93,57 @@ export class EdgeHttpSource {
     } catch (error) {
       console.error(`[reflex-edge-http] evaluate failed for ${blueprintId}: ${(error as Error).message}`);
       return json(500, { error: "internal — see worker log" });
+    }
+  }
+
+  /**
+   * Auth + existence resolution (R-109 FR-6, tightened per sage reflex#16):
+   * a caller without a VALID token always sees 401 — including for
+   * misconfigured routes. A blueprint whose secret binding is unset is
+   * logged server-side once and indistinguishable from a missing
+   * blueprint to unauthenticated callers (the old 503 leaked existence).
+   */
+  private authorize(request: Request, blueprintId: string): Response | "ok" {
+    const presented = bearerOf(request);
+    const blueprint = this.store.get(blueprintId);
+    const tokenBinding =
+      blueprint && blueprint.kind === "http" ? (blueprint.when as HttpWhen).http.token_env : undefined;
+    const expectedRaw = tokenBinding ? this.secrets[tokenBinding] : undefined;
+    const expected = typeof expectedRaw === "string" ? expectedRaw : undefined;
+
+    if (blueprint && blueprint.kind === "http" && tokenBinding && expected === undefined) {
+      if (!this.misconfigWarned.has(blueprintId)) {
+        this.misconfigWarned.add(blueprintId);
+        console.error(`[reflex-edge-http] ${blueprintId}: secret binding ${tokenBinding} is unset — route disabled (401 to callers)`);
+      }
+      return json(401, { error: "unauthorized" });
+    }
+    if (!presented || !expected || !constantTimeEquals(presented, expected)) {
+      return json(401, { error: "unauthorized" });
+    }
+    if (!blueprint || blueprint.kind !== "http") {
+      this.buckets.delete(blueprintId);
+      this.misconfigWarned.delete(blueprintId);
+      return json(404, { error: `no http Activation Blueprint "${blueprintId}" loaded` });
+    }
+    return "ok";
+  }
+
+  /** Bounded, JSON-object-only body parse; a Response return is the error. */
+  private async parseJsonBody(request: Request): Promise<Record<string, unknown> | Response> {
+    if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
+      return json(415, { error: "content-type must be application/json" });
+    }
+    const declared = Number(request.headers.get("content-length") ?? 0);
+    if (declared > MAX_BODY_BYTES) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
+    const raw = await readBounded(request, MAX_BODY_BYTES);
+    if (raw === null) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
+    try {
+      const parsed = JSON.parse(raw === "" ? "{}" : raw);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not an object");
+      return parsed as Record<string, unknown>;
+    } catch {
+      return json(422, { error: "body must be a JSON object" });
     }
   }
 

@@ -54,8 +54,8 @@ wrangler secret put <TOKEN_BINDING>          # one per http blueprint token_env
 wrangler kv key put --binding REFLEX_BLUEPRINTS activation/pr-stats.yaml --path ./reflex.yaml
 
 # 5. crons: every schedule-blueprint expression MUST be listed in
-#    wrangler.toml [triggers].crons — GET /status reports drift
-#    (cronExpressions vs your declared list).
+#    wrangler.toml [triggers].crons — the DO /status route (internal)
+#    reports drift (scheduleExpressions vs your declared list).
 
 wrangler deploy
 ```
@@ -74,8 +74,9 @@ wrangler deploy
   (eventually consistent, up to ~60s) — nothing in Reflex assumes fresher.
 - **DO eviction (deploy/restart) drops in-memory subscriptions** until the
   next event wakes the DO and re-subscribes. JetStream durable consumers
-  bound the damage: missed envelopes redeliver on resubscribe — degraded
-  latency, not message loss.
+  are EXPECTED to resume from the ack floor on resubscribe (bounding the
+  damage to delayed redelivery) — that resumption is part of the live
+  verification scope below, not proven by this PR.
 - **Bundle carries dormant `@nats-io/transport-node` code**: the myelin root
   barrel re-exports `NATSTransport` (CJS dep — not tree-shakeable). It never
   executes on edge (the WS transport is injected), `nodejs_compat` satisfies

@@ -18,10 +18,11 @@ compatibility_date = "2026-06-01"
 compatibility_flags = ["nodejs_compat"]
 
 # Every distinct cron expression used by a schedule-kind Activation
-# Blueprint MUST appear here — Cron Triggers are the clock, Reflex maps
-# event.cron back to blueprints by expression equality. The /status route
-# reports blueprint expressions so drift is visible
-# (CronSource.unmatchedExpressions).
+# Blueprint MUST appear here — Cron Triggers are the clock; Reflex maps
+# the fired expression back to blueprints by STRING equality (canonical
+# forms only). The DO /status route (internal) reports blueprint
+# expressions so drift is visible (EdgeScheduleSource.unmatchedExpressions);
+# a firing that matches zero blueprints warns loudly.
 [triggers]
 crons = ["0 7 * * *"]
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { KVNamespace } from "@cloudflare/workers-types";
 import { BlueprintStore } from "../../src/activation/store";
 import type { ActivationBlueprint } from "../../src/activation/types";
-import { CronSource } from "../../src/edge/cron";
+import { EdgeScheduleSource } from "../../src/edge/schedule";
 import { EdgeHttpSource } from "../../src/edge/http";
 import { loadBlueprintsFromKV } from "../../src/edge/kv-blueprints";
 import type { EvaluateResult, Impulse } from "../../src/pipeline/impulse";
@@ -69,10 +69,10 @@ describe("EdgeHttpSource", () => {
     expect(response.status).toBe(401);
   });
 
-  it("unset secret binding disables the route with 503", async () => {
+  it("unset secret binding is indistinguishable from missing blueprint (401, not 503)", async () => {
     const source = new EdgeHttpSource(new BlueprintStore([bp({})]), sink(), {});
     const response = await source.handle(post("/impulse/bp", { headers: auth }));
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(401);
   });
 
   it("rejects non-JSON-object bodies with 422", async () => {
@@ -99,14 +99,14 @@ describe("EdgeHttpSource", () => {
   });
 });
 
-describe("CronSource", () => {
+describe("EdgeScheduleSource", () => {
   const schedBp = (id: string, schedule: string): ActivationBlueprint =>
     bp({ id, kind: "schedule", when: { schedule } });
 
   it("evaluates only blueprints whose expression matches the fired cron", async () => {
     const s = sink();
     const store = new BlueprintStore([schedBp("daily", "0 7 * * *"), schedBp("hourly", "0 * * * *")]);
-    const source = new CronSource(store, s);
+    const source = new EdgeScheduleSource(store, s);
     const results = await source.onScheduled({ cron: "0 7 * * *", scheduledTime: Date.parse("2026-06-11T07:00:00Z") });
     expect(results.length).toBe(1);
     expect(s.seen[0]!.blueprintId).toBe("daily");
@@ -116,7 +116,7 @@ describe("CronSource", () => {
 
   it("no matching expression → zero evaluations", async () => {
     const s = sink();
-    const source = new CronSource(new BlueprintStore([schedBp("daily", "0 7 * * *")]), s);
+    const source = new EdgeScheduleSource(new BlueprintStore([schedBp("daily", "0 7 * * *")]), s);
     const results = await source.onScheduled({ cron: "*/5 * * * *", scheduledTime: Date.now() });
     expect(results.length).toBe(0);
     expect(s.seen.length).toBe(0);
@@ -124,7 +124,7 @@ describe("CronSource", () => {
 
   it("reports blueprint expressions missing from the wrangler-declared cron list", () => {
     const store = new BlueprintStore([schedBp("daily", "0 7 * * *"), schedBp("hourly", "0 * * * *")]);
-    const source = new CronSource(store, sink());
+    const source = new EdgeScheduleSource(store, sink());
     expect(source.unmatchedExpressions(["0 7 * * *"])).toEqual(["0 * * * *"]);
     expect(source.unmatchedExpressions(["0 7 * * *", "0 * * * *"])).toEqual([]);
   });
@@ -177,5 +177,34 @@ activations:
   it("duplicate ids across keys throw naming both KV keys", async () => {
     const kv = mockKV({ "activation/a.yaml": DOC, "activation/b.yaml": DOC });
     await expect(loadBlueprintsFromKV(kv)).rejects.toThrow(/kv:activation\/a\.yaml.*kv:activation\/b\.yaml|defined in both/);
+  });
+});
+
+describe("worker public allowlist (sage reflex#16 blocker)", () => {
+  function workerEnv() {
+    const forwarded: Request[] = [];
+    const stub = { fetch: async (req: Request) => { forwarded.push(req as Request); return new Response("ok"); } };
+    const env = {
+      REFLEX_CONSUMER: { idFromName: () => "id", get: () => stub },
+    } as never;
+    return { env, forwarded };
+  }
+
+  it("public /schedule and /status are 404 at the Worker — never forwarded to the DO", async () => {
+    const { default: worker } = await import("../../src/edge/worker");
+    const { env, forwarded } = workerEnv();
+    for (const path of ["/schedule", "/status", "/cron"]) {
+      const response = await worker.fetch(new Request(`https://edge.example${path}`, { method: "POST" }), env);
+      expect(response.status).toBe(404);
+    }
+    expect(forwarded.length).toBe(0);
+  });
+
+  it("/impulse/* is forwarded", async () => {
+    const { default: worker } = await import("../../src/edge/worker");
+    const { env, forwarded } = workerEnv();
+    const response = await worker.fetch(new Request("https://edge.example/impulse/bp", { method: "POST" }), env);
+    expect(response.status).toBe(200);
+    expect(forwarded.length).toBe(1);
   });
 });

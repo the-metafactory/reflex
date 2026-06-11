@@ -1,8 +1,8 @@
 import type { BlueprintStore } from "../activation/store";
 import type { EvaluateResult, Impulse } from "../pipeline/impulse";
 
-/** Pipeline slice the cron source needs — injectable for tests. */
-export interface CronSink {
+/** Pipeline slice the schedule source needs — injectable for tests. */
+export interface ScheduleSink {
   evaluate(impulse: Impulse): Promise<EvaluateResult>;
 }
 
@@ -27,10 +27,10 @@ export interface CronSink {
  *   delivery harmless
  * - no backfill, same as R-105 (missed ticks are never replayed)
  */
-export class CronSource {
+export class EdgeScheduleSource {
   constructor(
     private readonly store: BlueprintStore,
-    private readonly sink: CronSink,
+    private readonly sink: ScheduleSink,
   ) {}
 
   /** Schedule expressions blueprints use that the worker MUST declare in wrangler.toml. */
@@ -59,7 +59,7 @@ export class CronSource {
       // enumerated equivalent never match. Silent non-scheduling is the
       // failure mode; be loud instead.
       console.warn(
-        `[reflex-edge-cron] trigger "${event.cron}" matched no schedule blueprint — ` +
+        `[reflex-edge-schedule] trigger "${event.cron}" matched no schedule blueprint — ` +
           `blueprint expressions: [${this.expressions().join(", ")}] (string equality; use canonical forms)`,
       );
       return results;
@@ -67,7 +67,7 @@ export class CronSource {
     for (const blueprint of matched) {
       if (timezoneOf(blueprint)) {
         console.warn(
-          `[reflex-edge-cron] ${blueprint.id}: timezone "${timezoneOf(blueprint)}" ignored — Cron Triggers fire in UTC`,
+          `[reflex-edge-schedule] ${blueprint.id}: timezone "${timezoneOf(blueprint)}" ignored — Cron Triggers fire in UTC`,
         );
       }
       const impulse: Impulse = {
@@ -80,7 +80,7 @@ export class CronSource {
       try {
         results.push(await this.sink.evaluate(impulse));
       } catch (error) {
-        console.error(`[reflex-edge-cron] evaluate failed for ${blueprint.id}: ${(error as Error).message}`);
+        console.error(`[reflex-edge-schedule] evaluate failed for ${blueprint.id}: ${(error as Error).message}`);
       }
     }
     return results;

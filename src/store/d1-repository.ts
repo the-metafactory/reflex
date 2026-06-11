@@ -205,17 +205,28 @@ export class D1Repository implements RepositoryPort {
     return due;
   }
 
+  /**
+   * Bounded-parallel chunks (sage reflex#16 perf finding): a 500-row sweep
+   * as strictly sequential D1 round-trips creates avoidable tail latency.
+   * Each resolveMatched stays individually atomic (its own batch); chunks
+   * just overlap the network round-trips.
+   */
   private async expireWaiting(
     decisionIds: string[],
     reason: "timeout" | "blueprint-removed",
     now: string,
   ): Promise<void> {
-    for (const decisionId of decisionIds) {
-      try {
-        await this.resolveMatched(decisionId, { kind: "expire", resolutionOutcome: "expired", reason, now });
-      } catch (error) {
-        if (!(error instanceof ConflictError)) throw error; // raced an approve/deny — fine
-      }
+    const CHUNK = 10;
+    for (let i = 0; i < decisionIds.length; i += CHUNK) {
+      await Promise.all(
+        decisionIds.slice(i, i + CHUNK).map(async (decisionId) => {
+          try {
+            await this.resolveMatched(decisionId, { kind: "expire", resolutionOutcome: "expired", reason, now });
+          } catch (error) {
+            if (!(error instanceof ConflictError)) throw error; // raced an approve/deny — fine
+          }
+        }),
+      );
     }
   }
 

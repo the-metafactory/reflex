@@ -6,7 +6,7 @@ import { REFLEX_STREAM_NAME } from "../bus/stream";
 import type { ReflexConfig } from "../config/schema";
 import { Pipeline } from "../pipeline/evaluate";
 import { BusSource } from "../sources/bus";
-import { CronSource } from "./cron";
+import { EdgeScheduleSource } from "./schedule";
 import { D1Repository } from "../store/d1-repository";
 import { EdgeHttpSource } from "./http";
 import { loadBlueprintsFromKV } from "./kv-blueprints";
@@ -37,7 +37,7 @@ interface Runtime {
   pipeline: Pipeline;
   busSource: BusSource;
   http: EdgeHttpSource;
-  cron: CronSource;
+  schedule: EdgeScheduleSource;
 }
 
 /**
@@ -88,7 +88,14 @@ export class ReflexConsumer {
 
   private ensureStarted(): Promise<Runtime> {
     if (this.runtime) return Promise.resolve(this.runtime);
-    this.starting ??= this.start();
+    // A rejected startup must NOT be cached (sage reflex#16 finding): a
+    // transient KV/D1/bus failure would otherwise poison every later
+    // fetch/alarm until the DO is evicted. Clear the slot on rejection so
+    // the next event retries startup.
+    this.starting ??= this.start().catch((error: unknown) => {
+      this.starting = null;
+      throw error;
+    });
     return this.starting;
   }
 
@@ -109,7 +116,7 @@ export class ReflexConsumer {
     const pipeline = new Pipeline({ store, repo, bus });
     const busSource = new BusSource(cfg, store, bus, pipeline, repo);
     const http = new EdgeHttpSource(store, pipeline, this.env);
-    const cron = new CronSource(store, pipeline);
+    const schedule = new EdgeScheduleSource(store, pipeline);
 
     // R-106 lifecycle wiring: Matched Decisions for removed blueprints
     // expire with reason blueprint-removed — same as the local daemon.
@@ -125,23 +132,30 @@ export class ReflexConsumer {
     await busSource.start();
     await this.state.storage.setAlarm(Date.now() + REFRESH_ALARM_MS);
 
-    this.runtime = { store, repo, bus, pipeline, busSource, http, cron };
+    this.runtime = { store, repo, bus, pipeline, busSource, http, schedule };
     return this.runtime;
   }
 
   /**
-   * Internal protocol from the Worker front:
-   * - POST /cron {cron, scheduledTime} — Cron Trigger forward
-   * - GET /status — counters + active subscriptions
-   * - anything else — the public HTTP impulse surface (EdgeHttpSource)
+   * Protocol from the Worker front (which allowlists what the public
+   * internet can reach — see worker.ts):
+   * - POST /schedule {expression, scheduledTime} — Cron Trigger forward (internal)
+   * - GET /status — counters + active subscriptions (internal)
+   * - /impulse/* — the public HTTP impulse surface (EdgeHttpSource)
    */
   async fetch(request: Request): Promise<Response> {
     const runtime = await this.ensureStarted();
     const url = new URL(request.url);
 
-    if (url.pathname === "/cron" && request.method === "POST") {
-      const event = (await request.json()) as { cron: string; scheduledTime: number };
-      const results = await runtime.cron.onScheduled(event);
+    // SECURITY (sage reflex#16 blocker): /schedule and /status are the
+    // INTERNAL protocol — the Worker front forwards only /impulse/* from
+    // the public internet (worker.ts allowlist), so these paths are
+    // reachable solely via the scheduled-handler stub call. Canonical
+    // vocabulary: the Impulse Kind is `schedule`; Cloudflare's `cron`
+    // field name stays at the platform boundary in worker.ts.
+    if (url.pathname === "/schedule" && request.method === "POST") {
+      const event = (await request.json()) as { expression: string; scheduledTime: number };
+      const results = await runtime.schedule.onScheduled({ cron: event.expression, scheduledTime: event.scheduledTime });
       return Response.json({ evaluated: results.length, outcomes: results.map((r) => r.outcome) });
     }
 
@@ -149,7 +163,7 @@ export class ReflexConsumer {
       return Response.json({
         blueprints: runtime.store.current().length,
         busSubscriptions: runtime.busSource.active(),
-        cronExpressions: runtime.cron.expressions(),
+        scheduleExpressions: runtime.schedule.expressions(),
         bus: runtime.bus.metrics(),
       });
     }

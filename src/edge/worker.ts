@@ -22,15 +22,29 @@ function consumer(env: WorkerEnv) {
  */
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+    // PUBLIC ALLOWLIST (sage reflex#16 blocker): only the impulse surface
+    // is forwarded. /schedule and /status are the DO's internal protocol —
+    // an unauthenticated POST /schedule from the internet must never be
+    // able to trigger schedule blueprints outside Cloudflare Cron.
+    const url = new URL(request.url);
+    if (!url.pathname.startsWith("/impulse/")) {
+      return new Response(JSON.stringify({ error: "unknown path" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    }
     return consumer(env).fetch(request as never) as unknown as Promise<Response>;
   },
 
   async scheduled(controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
+    // Cloudflare's field is named `cron`; the canonical vocabulary
+    // (CONTEXT.md: Impulse Kind `schedule`, `cron` is an Avoid alias)
+    // takes over at this boundary.
     ctx.waitUntil(
-      consumer(env).fetch("https://reflex-edge.internal/cron", {
+      consumer(env).fetch("https://reflex-edge.internal/schedule", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cron: controller.cron, scheduledTime: controller.scheduledTime }),
+        body: JSON.stringify({ expression: controller.cron, scheduledTime: controller.scheduledTime }),
       }) as unknown as Promise<Response>,
     );
   },
