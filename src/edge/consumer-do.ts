@@ -21,8 +21,11 @@ export interface ReflexEdgeEnv {
   REFLEX_STACK?: string;
   /** wss:// URL of the hub's WebSocket listener (DD-70 port 9222). */
   REFLEX_NATS_WS_URL: string;
-  /** Secret: inline .creds file CONTENT (myelin WebSocketTransport credsContent). */
-  REFLEX_NATS_CREDS?: string;
+  /** Secret (REQUIRED): inline .creds file CONTENT (myelin credsContent).
+   * There is no insecure fallback on edge — the local daemon's
+   * nats.insecure escape hatch is loopback-only by definition, and a
+   * Worker has no loopback bus. Missing secret → startup throws. */
+  REFLEX_NATS_CREDS: string;
   /** HTTP-blueprint token secrets are looked up by binding name. */
   [binding: string]: unknown;
 }
@@ -104,11 +107,20 @@ export class ReflexConsumer {
     const store = new BlueprintStore(await loadBlueprintsFromKV(this.env.REFLEX_BLUEPRINTS));
     const repo = new D1Repository(this.env.REFLEX_DB);
 
+    // FAIL CLOSED (sage reflex#16 cycle-2 blocker): a missing secret must
+    // never silently downgrade to an unauthenticated remote bus
+    // connection — the same invariant the local daemon enforces via the
+    // DD-72 creds fail-fast. requireAuth stays hard-true.
+    if (!this.env.REFLEX_NATS_CREDS || this.env.REFLEX_NATS_CREDS.trim() === "") {
+      throw new Error(
+        "REFLEX_NATS_CREDS secret is required — provision the inline .creds content (wrangler secret put REFLEX_NATS_CREDS); there is no insecure mode on edge",
+      );
+    }
     const transport = new WebSocketTransport({
       servers: this.env.REFLEX_NATS_WS_URL,
       name: `reflex-edge-${cfg.principal}`,
       credsContent: this.env.REFLEX_NATS_CREDS,
-      requireAuth: this.env.REFLEX_NATS_CREDS !== undefined,
+      requireAuth: true,
       streamName: REFLEX_STREAM_NAME,
     });
     const bus = createReflexBus(cfg, { transport });

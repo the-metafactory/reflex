@@ -64,23 +64,36 @@ export class EdgeScheduleSource {
       );
       return results;
     }
-    for (const blueprint of matched) {
-      if (timezoneOf(blueprint)) {
-        console.warn(
-          `[reflex-edge-schedule] ${blueprint.id}: timezone "${timezoneOf(blueprint)}" ignored — Cron Triggers fire in UTC`,
-        );
-      }
-      const impulse: Impulse = {
-        kind: "schedule",
-        blueprintId: blueprint.id,
-        payload: { scheduled_for: scheduledFor },
-        receivedAt: new Date().toISOString(),
-        actor: { type: "system", id: "reflex-scheduler" },
-      };
-      try {
-        results.push(await this.sink.evaluate(impulse));
-      } catch (error) {
-        console.error(`[reflex-edge-schedule] evaluate failed for ${blueprint.id}: ${(error as Error).message}`);
+    // Bounded parallel chunks: distinct blueprints are independent (the
+    // pipeline serializes per blueprint internally); strict sequencing
+    // here only added latency (sage cycle-2 finding).
+    const CHUNK = 5;
+    for (let i = 0; i < matched.length; i += CHUNK) {
+      const settled = await Promise.allSettled(
+        matched.slice(i, i + CHUNK).map((blueprint) => {
+          if (timezoneOf(blueprint)) {
+            console.warn(
+              `[reflex-edge-schedule] ${blueprint.id}: timezone "${timezoneOf(blueprint)}" ignored — Cron Triggers fire in UTC`,
+            );
+          }
+          const impulse: Impulse = {
+            kind: "schedule",
+            blueprintId: blueprint.id,
+            payload: { scheduled_for: scheduledFor },
+            receivedAt: new Date().toISOString(),
+            actor: { type: "system", id: "reflex-scheduler" },
+          };
+          return this.sink.evaluate(impulse);
+        }),
+      );
+      for (const [j, outcome] of settled.entries()) {
+        if (outcome.status === "fulfilled") results.push(outcome.value);
+        else {
+          const blueprint = matched[i + j]!;
+          console.error(
+            `[reflex-edge-schedule] evaluate failed for ${blueprint.id}: ${(outcome.reason as Error).message}`,
+          );
+        }
       }
     }
     return results;

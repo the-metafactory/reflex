@@ -30,6 +30,9 @@ crons = ["0 7 * * *"]
 binding = "REFLEX_DB"
 database_name = "reflex"
 database_id = "00000000-0000-0000-0000-000000000000" # set per account
+# Without this, `wrangler d1 migrations apply` has no migration source —
+# the drizzle/ SQL files are shared by the bun:sqlite and D1 drivers.
+migrations_dir = "drizzle"
 
 [[kv_namespaces]]
 binding = "REFLEX_BLUEPRINTS"

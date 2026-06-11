@@ -7,7 +7,7 @@ the edge deployment swaps adapters at the same seams the local daemon uses:
 |---|---|
 | bun:sqlite `Repository` | `D1Repository` (`src/store/d1-repository.ts`) — same schema, CAS via `meta.changes` + batch |
 | NATS TCP (`buildNatsTransport`) | myelin `WebSocketTransport` (`@the-metafactory/myelin/transport/websocket`) held by the Durable Object |
-| croner `ScheduleSource` (R-105) | Cron Triggers → `CronSource` (`src/edge/cron.ts`) |
+| croner `ScheduleSource` (R-105) | Cron Triggers → `EdgeScheduleSource` (`src/edge/schedule.ts`) |
 | `Bun.serve` `HttpSource` (R-109) | Workers fetch → `EdgeHttpSource` (`src/edge/http.ts`) |
 | config files + fs.watch (R-102) | KV documents → `loadBlueprintsFromKV` + DO alarm refresh |
 | launchd/systemd (R-111) | platform-managed |

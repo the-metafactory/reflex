@@ -30,14 +30,22 @@ export async function loadBlueprintsFromKV(
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
 
-  const documents = await Promise.all(
-    keys.map(async (key) => {
-      const text = await kv.get(key, "text");
-      // A key deleted between list and get is simply absent this cycle.
-      if (text === null) return [];
-      // sourceFile carries KV provenance — duplicate-id errors name both keys.
-      return parseActivationDocument(text, `kv:${key}`);
-    }),
-  );
+  // Bounded read fan-out (sage cycle-2 finding): refresh runs on the DO's
+  // alarm path; O(keys) concurrent gets would spike on large sets.
+  const CONCURRENT_READS = 8;
+  const documents: ActivationBlueprint[][] = [];
+  for (let i = 0; i < keys.length; i += CONCURRENT_READS) {
+    documents.push(
+      ...(await Promise.all(
+        keys.slice(i, i + CONCURRENT_READS).map(async (key) => {
+          const text = await kv.get(key, "text");
+          // A key deleted between list and get is simply absent this cycle.
+          if (text === null) return [];
+          // sourceFile carries KV provenance — duplicate-id errors name both keys.
+          return parseActivationDocument(text, `kv:${key}`);
+        }),
+      )),
+    );
+  }
   return mergeBlueprints(documents);
 }
