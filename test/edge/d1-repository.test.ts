@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { D1Repository } from "../../src/edge/d1-repository";
+import { D1Repository } from "../../src/store/d1-repository";
 import { ConflictError } from "../../src/store/repository";
 import { createD1Shim } from "./d1-shim";
 

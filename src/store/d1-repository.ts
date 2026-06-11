@@ -2,7 +2,7 @@ import { and, desc, eq, lte, sql } from "drizzle-orm";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import type { D1Database } from "@cloudflare/workers-types";
 import type { ReflexActor } from "../bus/envelopes";
-import type { RepositoryPort } from "../store/port";
+import type { RepositoryPort } from "./port";
 import {
   ConflictError,
   StorageError,
@@ -10,8 +10,8 @@ import {
   type DecisionOutcome,
   type DecisionRow,
   type ImpulseSnapshot,
-} from "../store/repository";
-import * as schema from "../store/schema";
+} from "./repository";
+import * as schema from "./schema";
 
 const { approvals, decisions, firedEvents, guardState, idempotencyKeys, ignoredCounters } = schema;
 

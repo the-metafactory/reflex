@@ -1,0 +1,172 @@
+import type { D1Database, DurableObjectState, KVNamespace } from "@cloudflare/workers-types";
+import { WebSocketTransport } from "@the-metafactory/myelin/transport/websocket";
+import { BlueprintStore } from "../activation/store";
+import { createReflexBus, type ReflexBus } from "../bus";
+import { REFLEX_STREAM_NAME } from "../bus/stream";
+import type { ReflexConfig } from "../config/schema";
+import { Pipeline } from "../pipeline/evaluate";
+import { BusSource } from "../sources/bus";
+import { CronSource } from "./cron";
+import { D1Repository } from "../store/d1-repository";
+import { EdgeHttpSource } from "./http";
+import { loadBlueprintsFromKV } from "./kv-blueprints";
+
+/** Bindings the reflex edge worker expects (wrangler.toml). */
+export interface ReflexEdgeEnv {
+  REFLEX_DB: D1Database;
+  REFLEX_BLUEPRINTS: KVNamespace;
+  /** Single NATS subject token, e.g. "jc" (same rule as local config). */
+  REFLEX_PRINCIPAL: string;
+  /** Single NATS subject token. Default "default". */
+  REFLEX_STACK?: string;
+  /** wss:// URL of the hub's WebSocket listener (DD-70 port 9222). */
+  REFLEX_NATS_WS_URL: string;
+  /** Secret: inline .creds file CONTENT (myelin WebSocketTransport credsContent). */
+  REFLEX_NATS_CREDS?: string;
+  /** HTTP-blueprint token secrets are looked up by binding name. */
+  [binding: string]: unknown;
+}
+
+/** Blueprint refresh cadence — the edge stand-in for fs.watch hot-reload. */
+const REFRESH_ALARM_MS = 5 * 60 * 1000;
+
+interface Runtime {
+  store: BlueprintStore;
+  repo: D1Repository;
+  bus: ReflexBus;
+  pipeline: Pipeline;
+  busSource: BusSource;
+  http: EdgeHttpSource;
+  cron: CronSource;
+}
+
+/**
+ * The Reflex edge consumer (reflex#15): ONE Durable Object instance is the
+ * single-writer evaluation host — the Worker's fetch and scheduled handlers
+ * forward everything here, so per-blueprint serialization (Pipeline.chains)
+ * holds across the whole deployment, exactly like the local daemon process.
+ * Run locks in D1 additionally CAS at the storage layer.
+ *
+ * The DO holds the myelin WebSocket bus connection (durable subscriptions
+ * for bus-kind blueprints + the pulse run-outcome consumer) and refreshes
+ * the blueprint set from KV on an alarm. v0 uses a plain held connection +
+ * alarm keep-alive — the hibernation API requires DO-native WebSockets and
+ * is incompatible with a client library's socket; revisit post-v0.
+ *
+ * Sovereignty: operating this DO against local-classified traffic is
+ * governed by DD-122 — the substrate must be declared (trusted_substrates)
+ * and the payload-at-rest rule resolved before production traffic.
+ */
+export class ReflexConsumer {
+  private runtime: Runtime | null = null;
+  private starting: Promise<Runtime> | null = null;
+
+  constructor(
+    private readonly state: DurableObjectState,
+    private readonly env: ReflexEdgeEnv,
+  ) {}
+
+  private cfg(): ReflexConfig {
+    return {
+      principal: this.env.REFLEX_PRINCIPAL,
+      stack: this.env.REFLEX_STACK ?? "default",
+      // url/creds are carried for interface completeness; the transport is
+      // injected below, so buildNatsTransport (and its fs access) never runs.
+      nats: { url: this.env.REFLEX_NATS_WS_URL, creds: "", insecure: false },
+      publishQueueLimit: 1000,
+      sovereignty: {
+        classification: "local",
+        data_residency: "CH",
+        max_hop: 0,
+        frontier_ok: false,
+        model_class: "any",
+      },
+      watchRoots: [],
+      activationsDir: "",
+    };
+  }
+
+  private ensureStarted(): Promise<Runtime> {
+    if (this.runtime) return Promise.resolve(this.runtime);
+    this.starting ??= this.start();
+    return this.starting;
+  }
+
+  private async start(): Promise<Runtime> {
+    const cfg = this.cfg();
+    const store = new BlueprintStore(await loadBlueprintsFromKV(this.env.REFLEX_BLUEPRINTS));
+    const repo = new D1Repository(this.env.REFLEX_DB);
+
+    const transport = new WebSocketTransport({
+      servers: this.env.REFLEX_NATS_WS_URL,
+      name: `reflex-edge-${cfg.principal}`,
+      credsContent: this.env.REFLEX_NATS_CREDS,
+      requireAuth: this.env.REFLEX_NATS_CREDS !== undefined,
+      streamName: REFLEX_STREAM_NAME,
+    });
+    const bus = createReflexBus(cfg, { transport });
+
+    const pipeline = new Pipeline({ store, repo, bus });
+    const busSource = new BusSource(cfg, store, bus, pipeline, repo);
+    const http = new EdgeHttpSource(store, pipeline, this.env);
+    const cron = new CronSource(store, pipeline);
+
+    // R-106 lifecycle wiring: Matched Decisions for removed blueprints
+    // expire with reason blueprint-removed — same as the local daemon.
+    store.onBlueprintsRemoved((ids) => {
+      const now = new Date().toISOString();
+      for (const id of ids) {
+        void repo.expireForBlueprint(id, now).catch((error: unknown) => {
+          console.error(`[reflex-edge] expireForBlueprint(${id}) failed: ${(error as Error).message}`);
+        });
+      }
+    });
+
+    await busSource.start();
+    await this.state.storage.setAlarm(Date.now() + REFRESH_ALARM_MS);
+
+    this.runtime = { store, repo, bus, pipeline, busSource, http, cron };
+    return this.runtime;
+  }
+
+  /**
+   * Internal protocol from the Worker front:
+   * - POST /cron {cron, scheduledTime} — Cron Trigger forward
+   * - GET /status — counters + active subscriptions
+   * - anything else — the public HTTP impulse surface (EdgeHttpSource)
+   */
+  async fetch(request: Request): Promise<Response> {
+    const runtime = await this.ensureStarted();
+    const url = new URL(request.url);
+
+    if (url.pathname === "/cron" && request.method === "POST") {
+      const event = (await request.json()) as { cron: string; scheduledTime: number };
+      const results = await runtime.cron.onScheduled(event);
+      return Response.json({ evaluated: results.length, outcomes: results.map((r) => r.outcome) });
+    }
+
+    if (url.pathname === "/status" && request.method === "GET") {
+      return Response.json({
+        blueprints: runtime.store.current().length,
+        busSubscriptions: runtime.busSource.active(),
+        cronExpressions: runtime.cron.expressions(),
+        bus: runtime.bus.metrics(),
+      });
+    }
+
+    return runtime.http.handle(request);
+  }
+
+  /** Alarm = blueprint refresh from KV (edge hot-reload) + re-arm. */
+  async alarm(): Promise<void> {
+    try {
+      const runtime = await this.ensureStarted();
+      runtime.store.swap(await loadBlueprintsFromKV(this.env.REFLEX_BLUEPRINTS));
+      await runtime.busSource.sync();
+    } catch (error) {
+      console.error(`[reflex-edge] blueprint refresh failed (kept last good set): ${(error as Error).message}`);
+    } finally {
+      await this.state.storage.setAlarm(Date.now() + REFRESH_ALARM_MS);
+    }
+  }
+}

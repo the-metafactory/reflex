@@ -1,0 +1,54 @@
+# Reflex edge worker (reflex#15 iteration 3).
+#
+# DEPLOY GATES (DD-122): before any production traffic this deployment must
+# be declared in the principal's sovereignty policy (trusted_substrates)
+# and the Activation-Payload at-rest rule (declared residency acceptance vs
+# principal-key encryption) must be decided. Until then: dev/preview only.
+#
+# D1 migrations: reuse the repo's drizzle/ SQL —
+#   bunx wrangler d1 migrations apply reflex --remote
+# (the drizzle/*.sql files are the migration source for BOTH drivers).
+
+name = "reflex-edge"
+main = "src/edge/worker.ts"
+compatibility_date = "2026-06-01"
+# nodejs_compat covers the node:os/node:path imports reached through
+# config/schema.ts; the edge code paths themselves are Node-free
+# (portability guards in myelin + src/edge conventions).
+compatibility_flags = ["nodejs_compat"]
+
+# Every distinct cron expression used by a schedule-kind Activation
+# Blueprint MUST appear here — Cron Triggers are the clock, Reflex maps
+# event.cron back to blueprints by expression equality. The /status route
+# reports blueprint expressions so drift is visible
+# (CronSource.unmatchedExpressions).
+[triggers]
+crons = ["0 7 * * *"]
+
+[[d1_databases]]
+binding = "REFLEX_DB"
+database_name = "reflex"
+database_id = "00000000-0000-0000-0000-000000000000" # set per account
+
+[[kv_namespaces]]
+binding = "REFLEX_BLUEPRINTS"
+id = "00000000000000000000000000000000" # set per account
+
+[durable_objects]
+bindings = [
+  { name = "REFLEX_CONSUMER", class_name = "ReflexConsumer" },
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ReflexConsumer"]
+
+[vars]
+REFLEX_PRINCIPAL = "jc"
+REFLEX_STACK = "default"
+# The hub's WebSocket listener (DD-70: port 9222 on the Cloudflare hub).
+REFLEX_NATS_WS_URL = "wss://hub.invalid:9222"
+
+# Secrets (wrangler secret put):
+#   REFLEX_NATS_CREDS   — inline .creds file CONTENT (myelin credsContent)
+#   <token bindings>    — one per http blueprint's token_env

@@ -1,7 +1,7 @@
 {
   "name": "@the-metafactory/reflex",
   "version": "0.1.0",
-  "description": "Reflex — the activation runtime of the metafactory ecosystem",
+  "description": "Reflex \u2014 the activation runtime of the metafactory ecosystem",
   "type": "module",
   "license": "MIT",
   "scripts": {
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#f5ec8658030e2fc185f123b06d8bf94d9f74cd84",
+    "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#f8325f60af39a3e6f4a6c40117cb3263802427a0",
     "commander": "^15.0.0",
     "croner": "^10.0.1",
     "drizzle-orm": "^0.45.2",
