@@ -15,9 +15,10 @@ compatibility_date = "2026-06-01"
 # No nodejs_compat: since myelin#190 (./edge subpath) the wrangler dry-run
 # bundle greps clean for ALL previously-observed Node surfaces —
 # @nats-io/transport-node, node:fs, node:net, node:os, node:path,
-# node:tls (each 0 occurrences). Keeping the flag off makes any future
-# Node-only import fail loudly at build/deploy instead of riding a shim
-# into production.
+# node:tls (each 0 occurrences). Keeping the flag off means a STATICALLY
+# IMPORTED Node built-in on the bundled graph fails at deploy/runtime
+# instead of riding a shim (dynamic imports or condition-gated paths can
+# still evade the build — the dry-run grep stays the real check).
 
 # Every distinct cron expression used by a schedule-kind Activation
 # Blueprint MUST appear here — Cron Triggers are the clock; Reflex maps
