@@ -1,4 +1,3 @@
-import { NATSTransport } from "@the-metafactory/myelin";
 import type { ReflexConfig } from "../config/schema";
 
 export const REFLEX_STREAM_NAME = "REFLEX";
@@ -22,11 +21,21 @@ export async function ensureReflexStream(
   transport: unknown,
   cfg: Pick<ReflexConfig, "principal" | "stack">,
 ): Promise<void> {
-  if (!(transport instanceof NATSTransport)) {
+  // Capability check instead of `instanceof NATSTransport` (myelin#190):
+  // the class check value-imported NATSTransport, dragging transport-node
+  // into Workers bundles via this module (the DO imports REFLEX_STREAM_NAME
+  // from here). Structural dispatch is deliberately WIDER than the old
+  // nominal check: any transport exposing ensureStream provisions (NATS
+  // TCP, WebSocket); InMemoryTransport lacks it and skips, same as before.
+  if (transport === null || typeof transport !== "object") {
+    return; // null/undefined/primitive — nothing to provision (old instanceof was false here too)
+  }
+  const provisionable = transport as { ensureStream?: (name: string, subjects: string[], cfg: object) => Promise<void> };
+  if (typeof provisionable.ensureStream !== "function") {
     return; // InMemoryTransport — nothing to provision (tests, dry tooling)
   }
   try {
-    await transport.ensureStream(REFLEX_STREAM_NAME, reflexStreamSubjects(cfg), {
+    await provisionable.ensureStream(REFLEX_STREAM_NAME, reflexStreamSubjects(cfg), {
       retention: "limits",
       storage: "file",
       discard: "old",

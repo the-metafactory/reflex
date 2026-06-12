@@ -77,12 +77,13 @@ wrangler deploy
   are EXPECTED to resume from the ack floor on resubscribe (bounding the
   damage to delayed redelivery) — that resumption is part of the live
   verification scope below, not proven by this PR.
-- **Bundle carries dormant `@nats-io/transport-node` code**: the myelin root
-  barrel re-exports `NATSTransport` (CJS dep — not tree-shakeable). It never
-  executes on edge (the WS transport is injected), `nodejs_compat` satisfies
-  its module-load imports, and the bundle stays well under limits (~290 KB
-  gzip). A myelin follow-up for edge-safe envelope/middleware subpaths would
-  remove it.
+- **Bundle is fully Node-free** (myelin#190): all myelin imports on the
+  edge graph go through `@the-metafactory/myelin/edge`, and
+  `ensureReflexStream` duck-types the transport instead of
+  `instanceof NATSTransport`. The wrangler bundle greps clean for
+  transport-node/node:fs/node:net/node:os, `nodejs_compat` is OFF
+  (regressions fail loudly at build), and the bundle dropped ~295 KB raw /
+  ~57 KB gzip.
 
 ## Verification status — honest scope
 
