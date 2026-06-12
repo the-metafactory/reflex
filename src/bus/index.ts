@@ -3,7 +3,7 @@ import {
   createEnvelope,
   createMiddlewareTransport,
   metricsMiddleware,
-} from "@the-metafactory/myelin";
+} from "@the-metafactory/myelin/edge";
 import type {
   EnvelopePublishInput,
   EnvelopeRequestInput,
@@ -12,7 +12,7 @@ import type {
   Subscription,
   TransportPublisher,
   TransportSubscriber,
-} from "@the-metafactory/myelin";
+} from "@the-metafactory/myelin/edge";
 import { BoundedPublishQueue } from "./queue";
 import { REFLEX_STREAM_NAME } from "./stream";
 import type { ReflexConfig } from "../config/schema";

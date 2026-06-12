@@ -1,4 +1,4 @@
-import { subjectMatchesPattern } from "@the-metafactory/myelin";
+import { subjectMatchesPattern } from "@the-metafactory/myelin/edge";
 import type { BlueprintStore } from "../activation/store";
 import type { ActivationBlueprint, BusWhen } from "../activation/types";
 import type { ReflexBus } from "../bus";

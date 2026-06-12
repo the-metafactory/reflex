@@ -1,5 +1,5 @@
 import type { D1Database, DurableObjectState, KVNamespace } from "@cloudflare/workers-types";
-import { WebSocketTransport } from "@the-metafactory/myelin/transport/websocket";
+import { WebSocketTransport } from "@the-metafactory/myelin/edge";
 import { BlueprintStore } from "../activation/store";
 import { createReflexBus, type ReflexBus } from "../bus";
 import { REFLEX_STREAM_NAME } from "../bus/stream";

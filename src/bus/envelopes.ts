@@ -1,4 +1,4 @@
-import type { EnvelopePublishInput } from "@the-metafactory/myelin";
+import type { EnvelopePublishInput } from "@the-metafactory/myelin/edge";
 import type { ReflexConfig } from "../config/schema";
 
 /** Envelope type for a Fired Decision committing to start an Execution Run. */
