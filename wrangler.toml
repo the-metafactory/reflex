@@ -12,11 +12,12 @@
 name = "reflex-edge"
 main = "src/edge/worker.ts"
 compatibility_date = "2026-06-01"
-# No nodejs_compat: since myelin#190 (./edge subpath) the bundle contains
-# ZERO Node built-in references — wrangler dry-run output greps clean for
-# transport-node/node:fs/node:net/node:os. Keeping the flag off makes any
-# future Node-only import fail loudly at build/deploy instead of riding a
-# shim into production.
+# No nodejs_compat: since myelin#190 (./edge subpath) the wrangler dry-run
+# bundle greps clean for ALL previously-observed Node surfaces —
+# @nats-io/transport-node, node:fs, node:net, node:os, node:path,
+# node:tls (each 0 occurrences). Keeping the flag off makes any future
+# Node-only import fail loudly at build/deploy instead of riding a shim
+# into production.
 
 # Every distinct cron expression used by a schedule-kind Activation
 # Blueprint MUST appear here — Cron Triggers are the clock; Reflex maps

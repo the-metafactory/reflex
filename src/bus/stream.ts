@@ -24,9 +24,12 @@ export async function ensureReflexStream(
   // Capability check instead of `instanceof NATSTransport` (myelin#190):
   // the class check value-imported NATSTransport, dragging transport-node
   // into Workers bundles via this module (the DO imports REFLEX_STREAM_NAME
-  // from here). Any JetStream-backed transport (NATS TCP or WebSocket)
-  // exposes ensureStream; InMemoryTransport does not — same dispatch,
-  // structural instead of nominal.
+  // from here). Structural dispatch is deliberately WIDER than the old
+  // nominal check: any transport exposing ensureStream provisions (NATS
+  // TCP, WebSocket); InMemoryTransport lacks it and skips, same as before.
+  if (transport === null || typeof transport !== "object") {
+    return; // null/undefined/primitive — nothing to provision (old instanceof was false here too)
+  }
   const provisionable = transport as { ensureStream?: (name: string, subjects: string[], cfg: object) => Promise<void> };
   if (typeof provisionable.ensureStream !== "function") {
     return; // InMemoryTransport — nothing to provision (tests, dry tooling)
