@@ -32,14 +32,14 @@ crons = ["0 7 * * *"]
 [[d1_databases]]
 binding = "REFLEX_DB"
 database_name = "reflex"
-database_id = "00000000-0000-0000-0000-000000000000" # set per account
+database_id = "0b68f955-87fe-4384-83df-af8f6d1de816" # invisible.ch account, region EEUR
 # Without this, `wrangler d1 migrations apply` has no migration source —
 # the drizzle/ SQL files are shared by the bun:sqlite and D1 drivers.
 migrations_dir = "drizzle"
 
 [[kv_namespaces]]
 binding = "REFLEX_BLUEPRINTS"
-id = "00000000000000000000000000000000" # set per account
+id = "0f52ed4f786845a7a66cb37e3297855e" # invisible.ch account
 
 [durable_objects]
 bindings = [
@@ -53,8 +53,11 @@ new_sqlite_classes = ["ReflexConsumer"]
 [vars]
 REFLEX_PRINCIPAL = "jc"
 REFLEX_STACK = "default"
-# The hub's WebSocket listener (DD-70: port 9222 on the Cloudflare hub).
-REFLEX_NATS_WS_URL = "wss://hub.invalid:9222"
+# The mf hub's WebSocket listener (DD-70 port 9222). The hub is the
+# network-neutral metafactory hub (DD-73) — a SWITCH-cloud VM at
+# nats.meta-factory.dev, NOT a Cloudflare-hosted service. This Worker is
+# a client of it.
+REFLEX_NATS_WS_URL = "wss://nats.meta-factory.dev:9222"
 
 # Secrets (wrangler secret put):
 #   REFLEX_NATS_CREDS   — inline .creds file CONTENT (myelin credsContent)
