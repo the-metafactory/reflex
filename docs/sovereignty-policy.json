@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "network": "metafactory",
+  "egress": {
+    "block_local_escape": true,
+    "rules": []
+  },
+  "ingress": {
+    "scope_mappings": [],
+    "reject_unknown_partners": true
+  },
+  "chain_of_stamps": {
+    "verify_delegation_sovereignty": false
+  },
+  "trusted_substrates": [
+    {
+      "provider": "cloudflare",
+      "tenancy": "66c80b89ed06c59e27d321d0229fc34f",
+      "roles": ["reflex-edge"],
+      "data_residency_accepted": true
+    }
+  ]
+}
