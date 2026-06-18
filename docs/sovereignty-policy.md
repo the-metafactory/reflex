@@ -4,8 +4,11 @@
 artifact for the reflex-edge Cloudflare deployment. It is intent + audit
 surface only: reflex does not enforce it at runtime, and the myelin
 sovereignty engine's `SOVEREIGNTY_POLICY` KV bucket is not yet provisioned.
-It is shaped to load as-is (`nats kv put SOVEREIGNTY_POLICY config "$(cat
-docs/sovereignty-policy.json)"`) once that engine exists.
+The JSON validates against the `SovereigntyPolicy` schema (myelin
+`src/sovereignty/types.ts`); whether it loads cleanly into a *live* engine
+is unverified until that engine and the `SOVEREIGNTY_POLICY` bucket exist.
+The intended load step would then be `nats kv put SOVEREIGNTY_POLICY config
+"$(cat docs/sovereignty-policy.json)"`.
 
 ## Authority for `data_residency_accepted: true`
 
