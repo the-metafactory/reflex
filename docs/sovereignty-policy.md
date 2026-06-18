@@ -4,11 +4,20 @@
 artifact for the reflex-edge Cloudflare deployment. It is intent + audit
 surface only: reflex does not enforce it at runtime, and the myelin
 sovereignty engine's `SOVEREIGNTY_POLICY` KV bucket is not yet provisioned.
-The JSON validates against the `SovereigntyPolicy` schema (myelin
-`src/sovereignty/types.ts`); whether it loads cleanly into a *live* engine
-is unverified until that engine and the `SOVEREIGNTY_POLICY` bucket exist.
-The intended load step would then be `nats kv put SOVEREIGNTY_POLICY config
-"$(cat docs/sovereignty-policy.json)"`.
+The JSON passes myelin's own `validatePolicy` (myelin pinned at
+`2a5f1be67b567e98883614cf0ad5398e9d7252fb` in this repo's `package.json`):
+
+```
+$ bun -e 'import { validatePolicy } from "@the-metafactory/myelin"; \
+    const p = await Bun.file("docs/sovereignty-policy.json").json(); \
+    console.log(JSON.stringify(validatePolicy(p)));'
+{"valid":true,"errors":[]}
+```
+
+Schema validity is *not* the same as live-engine loadability: whether it
+loads cleanly into a running engine is unverified until that engine and the
+`SOVEREIGNTY_POLICY` bucket exist. The intended load step would then be
+`nats kv put SOVEREIGNTY_POLICY config "$(cat docs/sovereignty-policy.json)"`.
 
 ## Authority for `data_residency_accepted: true`
 
