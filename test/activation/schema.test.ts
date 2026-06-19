@@ -117,4 +117,57 @@ describe("activation schema", () => {
     const bps = parseActivationDocument(doc(entry), "/tmp/x.yaml");
     expect(bps[0]!.kind).toBe("http");
   });
+
+  it("accepts http github_hmac auth block + where (F-003)", () => {
+    const entry = `  - id: gh-pr
+    target: "@jc/gh-pr"
+    when:
+      http:
+        auth:
+          mode: github_hmac
+          secret_env: GITHUB_WEBHOOK_SECRET
+        where:
+          github_event: pull_request
+          action: opened
+`;
+    const bps = parseActivationDocument(doc(entry), "/tmp/x.yaml");
+    expect(bps[0]!.kind).toBe("http");
+    const http = (bps[0]!.when as { http: { auth?: { mode: string }; where?: Record<string, unknown> } }).http;
+    expect(http.auth?.mode).toBe("github_hmac");
+    expect(http.where).toEqual({ github_event: "pull_request", action: "opened" });
+  });
+
+  it("rejects http with both token_env and auth (mutually exclusive)", () => {
+    const bad = `  - id: gh-bad
+    target: "@jc/gh"
+    when:
+      http:
+        token_env: TOK
+        auth:
+          mode: bearer
+          secret_env: TOK
+`;
+    expect(() => parseActivationDocument(doc(bad), "/tmp/x.yaml")).toThrow(/mutually exclusive/);
+  });
+
+  it("rejects http with neither token_env nor auth", () => {
+    const bad = `  - id: gh-empty
+    target: "@jc/gh"
+    when:
+      http: {}
+`;
+    expect(() => parseActivationDocument(doc(bad), "/tmp/x.yaml")).toThrow(/requires token_env .* or an auth block/);
+  });
+
+  it("rejects invalid http auth.mode", () => {
+    const bad = `  - id: gh-mode
+    target: "@jc/gh"
+    when:
+      http:
+        auth:
+          mode: basic
+          secret_env: TOK
+`;
+    expect(() => parseActivationDocument(doc(bad), "/tmp/x.yaml")).toThrow(/bearer.*github_hmac|github_hmac/);
+  });
 });

@@ -106,3 +106,48 @@ before any meaningful traffic exists to test with):
 - await-interleaving inside the DO: per-blueprint serialization
   (Pipeline.chains) and BusSource's single-flight sync guard the known
   cross-await invariants, but this is analyzed, not load-tested.
+
+## GitHub webhooks (F-003) — watch repos for PRs/Issues, laptop-free
+
+The edge HTTP impulse source supports a **GitHub-HMAC** auth mode so a GitHub
+webhook can drive reflex directly — the whole cycle on Cloudflare, nothing on
+the operator's machine.
+
+Blueprint (`when.http`):
+
+```yaml
+when:
+  http:
+    auth:
+      mode: github_hmac
+      secret_env: GITHUB_WEBHOOK_SECRET   # Worker secret BINDING name
+    where:
+      github_event: pull_request          # X-GitHub-Event header
+      action: opened                      # flat top-level payload field
+```
+
+- **Auth:** `auth: { mode: bearer | github_hmac, secret_env }`. `github_hmac`
+  verifies `X-Hub-Signature-256` = `HMAC_SHA256(secret, rawBody)` (Web Crypto,
+  constant-time, over the exact received bytes). `token_env` remains the Bearer
+  shorthand; `token_env` and `auth` are mutually exclusive.
+- **Filtering:** optional `where` (flat field-equals, same matcher as bus). In
+  `github_hmac` mode the source injects three top-level payload fields before
+  matching/forwarding: `github_event` (from `X-GitHub-Event`), `repository`
+  (the payload's `repository.full_name`), and `github_delivery` (from
+  `X-GitHub-Delivery`). A non-match is an Ignored Decision (202), not a fire.
+- **Idempotency:** `github_delivery` rides in the payload, so the pipeline's
+  idempotency key dedups GitHub's at-least-once redelivery (fires once).
+
+Setup:
+
+```bash
+wrangler secret put GITHUB_WEBHOOK_SECRET     # the webhook's shared secret
+# GitHub repo → Settings → Webhooks → Add webhook:
+#   Payload URL:  https://<reflex-edge-host>/impulse/<blueprint-id>
+#   Content type: application/json
+#   Secret:       <same value>
+#   Events:       Pull requests / Issues
+```
+
+A bad/missing signature → 401 (indistinguishable from a missing blueprint —
+auth precedes existence). See `examples/github-pr-opened/`.

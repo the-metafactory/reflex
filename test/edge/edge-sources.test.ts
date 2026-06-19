@@ -103,6 +103,78 @@ describe("EdgeHttpSource", () => {
 // pure Scheduler.tick core (see test/scheduler/core.test.ts) driven by the
 // DO-alarm heartbeat (see test/edge/heartbeat.test.ts).
 
+describe("EdgeHttpSource — github_hmac (F-003)", () => {
+  const SECRET = "topsecret-webhook";
+  const ghBp = (where?: Record<string, string | number | boolean>): ActivationBlueprint =>
+    bp({ id: "gh", kind: "http", when: { http: { auth: { mode: "github_hmac", secret_env: "GH" }, ...(where ? { where } : {}) } } });
+
+  async function sign(secret: string, body: string): Promise<string> {
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
+    return "sha256=" + [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function ghPost(body: string, headers: Record<string, string>): Request {
+    return new Request("https://reflex.example/impulse/gh", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body,
+    });
+  }
+
+  const PR_BODY = JSON.stringify({ action: "opened", number: 7, repository: { full_name: "the-metafactory/reflex" } });
+
+  it("valid signature + matching where → fires, with injected top-level fields", async () => {
+    const s = sink();
+    const source = new EdgeHttpSource(new BlueprintStore([ghBp({ github_event: "pull_request", action: "opened" })]), s, { GH: SECRET });
+    const sig = await sign(SECRET, PR_BODY);
+    const res = await source.handle(ghPost(PR_BODY, { "x-hub-signature-256": sig, "x-github-event": "pull_request", "x-github-delivery": "d-1" }));
+    expect(res.status).toBe(202);
+    expect((await res.json() as Record<string, unknown>).outcome).toBe("fired");
+    expect(s.seen[0]!.payload.github_event).toBe("pull_request");
+    expect(s.seen[0]!.payload.repository).toBe("the-metafactory/reflex");
+    expect(s.seen[0]!.payload.github_delivery).toBe("d-1");
+    expect(s.seen[0]!.payload.action).toBe("opened"); // full payload preserved
+  });
+
+  it("tampered body (signature over different bytes) → 401", async () => {
+    const s = sink();
+    const source = new EdgeHttpSource(new BlueprintStore([ghBp()]), s, { GH: SECRET });
+    const sig = await sign(SECRET, PR_BODY);
+    const res = await source.handle(ghPost(JSON.stringify({ action: "closed" }), { "x-hub-signature-256": sig, "x-github-event": "pull_request" }));
+    expect(res.status).toBe(401);
+    expect(s.seen).toHaveLength(0);
+  });
+
+  it("missing signature header → 401", async () => {
+    const source = new EdgeHttpSource(new BlueprintStore([ghBp()]), sink(), { GH: SECRET });
+    expect((await source.handle(ghPost(PR_BODY, { "x-github-event": "pull_request" }))).status).toBe(401);
+  });
+
+  it("wrong secret → 401", async () => {
+    const source = new EdgeHttpSource(new BlueprintStore([ghBp()]), sink(), { GH: SECRET });
+    const sig = await sign("not-the-secret", PR_BODY);
+    expect((await source.handle(ghPost(PR_BODY, { "x-hub-signature-256": sig, "x-github-event": "pull_request" }))).status).toBe(401);
+  });
+
+  it("unset secret binding → 401 (route disabled)", async () => {
+    const source = new EdgeHttpSource(new BlueprintStore([ghBp()]), sink(), {});
+    const sig = await sign(SECRET, PR_BODY);
+    expect((await source.handle(ghPost(PR_BODY, { "x-hub-signature-256": sig, "x-github-event": "pull_request" }))).status).toBe(401);
+  });
+
+  it("where filter: non-matching event → 202 ignored, not fired", async () => {
+    const s = sink();
+    const source = new EdgeHttpSource(new BlueprintStore([ghBp({ github_event: "pull_request", action: "opened" })]), s, { GH: SECRET });
+    const issueBody = JSON.stringify({ action: "opened", repository: { full_name: "the-metafactory/reflex" } });
+    const sig = await sign(SECRET, issueBody);
+    const res = await source.handle(ghPost(issueBody, { "x-hub-signature-256": sig, "x-github-event": "issues", "x-github-delivery": "d-2" }));
+    expect(res.status).toBe(202);
+    expect((await res.json() as Record<string, unknown>).outcome).toBe("ignored");
+    expect(s.seen).toHaveLength(0);
+  });
+});
+
 describe("loadBlueprintsFromKV", () => {
   const DOC = `schema: metafactory/activation/v1
 activations:
