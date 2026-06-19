@@ -6,7 +6,8 @@ import { REFLEX_STREAM_NAME } from "../bus/stream";
 import type { ReflexConfig } from "../config/schema";
 import { Pipeline } from "../pipeline/evaluate";
 import { BusSource } from "../sources/bus";
-import { EdgeScheduleSource } from "./schedule";
+import { Scheduler } from "../scheduler/core";
+import { EdgeHeartbeat, ALARM_PERIOD_MS } from "./heartbeat";
 import { D1Repository } from "../store/d1-repository";
 import { EdgeHttpSource } from "./http";
 import { loadBlueprintsFromKV } from "./kv-blueprints";
@@ -30,9 +31,6 @@ export interface ReflexEdgeEnv {
   [binding: string]: unknown;
 }
 
-/** Blueprint refresh cadence — the edge stand-in for fs.watch hot-reload. */
-const REFRESH_ALARM_MS = 5 * 60 * 1000;
-
 interface Runtime {
   store: BlueprintStore;
   repo: D1Repository;
@@ -40,21 +38,24 @@ interface Runtime {
   pipeline: Pipeline;
   busSource: BusSource;
   http: EdgeHttpSource;
-  schedule: EdgeScheduleSource;
+  scheduler: Scheduler;
+  heartbeat: EdgeHeartbeat;
 }
 
 /**
  * The Reflex edge consumer (reflex#15): ONE Durable Object instance is the
- * single-writer evaluation host — the Worker's fetch and scheduled handlers
- * forward everything here, so per-blueprint serialization (Pipeline.chains)
- * holds across the whole deployment, exactly like the local daemon process.
- * Run locks in D1 additionally CAS at the storage layer.
+ * single-writer evaluation host — the Worker's fetch handler forwards impulse
+ * traffic here, so per-blueprint serialization (Pipeline.chains) holds across
+ * the whole deployment, exactly like the local daemon process. Run locks in
+ * D1 additionally CAS at the storage layer.
  *
- * The DO holds the myelin WebSocket bus connection (durable subscriptions
- * for bus-kind blueprints + the pulse run-outcome consumer) and refreshes
- * the blueprint set from KV on an alarm. v0 uses a plain held connection +
- * alarm keep-alive — the hibernation API requires DO-native WebSockets and
- * is incompatible with a client library's socket; revisit post-v0.
+ * The DO holds the myelin WebSocket bus connection (durable subscriptions for
+ * bus-kind blueprints + the pulse run-outcome consumer). A self-rescheduling
+ * alarm is the scheduler heartbeat (F-002): it evaluates due schedule
+ * blueprints AND refreshes the blueprint set from KV on cadence — so reflex,
+ * not Cloudflare Cron Triggers, owns the schedule clock. v0 uses a plain held
+ * connection + alarm keep-alive — the hibernation API requires DO-native
+ * WebSockets and is incompatible with a client library's socket; revisit post-v0.
  *
  * Sovereignty: operating this DO against local-classified traffic is
  * governed by DD-122 — the substrate must be declared (trusted_substrates)
@@ -128,7 +129,13 @@ export class ReflexConsumer {
     const pipeline = new Pipeline({ store, repo, bus });
     const busSource = new BusSource(cfg, store, bus, pipeline, repo);
     const http = new EdgeHttpSource(store, pipeline, this.env);
-    const schedule = new EdgeScheduleSource(store, pipeline);
+    // F-002: reflex owns the schedule clock. A self-rescheduling DO alarm
+    // (EdgeHeartbeat) drives Scheduler.tick — zero Cloudflare Cron Triggers.
+    const scheduler = new Scheduler({ store, sink: pipeline });
+    const heartbeat = new EdgeHeartbeat(this.state, scheduler, async () => {
+      store.swap(await loadBlueprintsFromKV(this.env.REFLEX_BLUEPRINTS));
+      await busSource.sync();
+    });
 
     // R-106 lifecycle wiring: Matched Decisions for removed blueprints
     // expire with reason blueprint-removed — same as the local daemon.
@@ -142,40 +149,35 @@ export class ReflexConsumer {
     });
 
     await busSource.start();
-    await this.state.storage.setAlarm(Date.now() + REFRESH_ALARM_MS);
+    await heartbeat.arm(); // start the heartbeat (schedule eval + KV refresh)
 
-    this.runtime = { store, repo, bus, pipeline, busSource, http, schedule };
+    this.runtime = { store, repo, bus, pipeline, busSource, http, scheduler, heartbeat };
     return this.runtime;
   }
 
   /**
    * Protocol from the Worker front (which allowlists what the public
    * internet can reach — see worker.ts):
-   * - POST /schedule {expression, scheduledTime} — Cron Trigger forward (internal)
-   * - GET /status — counters + active subscriptions (internal)
+   * - GET /status — counters + active subscriptions + heartbeat (internal)
    * - /impulse/* — the public HTTP impulse surface (EdgeHttpSource)
+   *
+   * F-002: the old POST /schedule Cron-Trigger forward is gone — scheduling
+   * is driven internally by the DO alarm (EdgeHeartbeat), not by CF crons.
    */
   async fetch(request: Request): Promise<Response> {
     const runtime = await this.ensureStarted();
     const url = new URL(request.url);
 
-    // SECURITY (sage reflex#16 blocker): /schedule and /status are the
-    // INTERNAL protocol — the Worker front forwards only /impulse/* from
-    // the public internet (worker.ts allowlist), so these paths are
-    // reachable solely via the scheduled-handler stub call. Canonical
-    // vocabulary: the Impulse Kind is `schedule`; Cloudflare's `cron`
-    // field name stays at the platform boundary in worker.ts.
-    if (url.pathname === "/schedule" && request.method === "POST") {
-      const event = (await request.json()) as { expression: string; scheduledTime: number };
-      const results = await runtime.schedule.onScheduled({ cron: event.expression, scheduledTime: event.scheduledTime });
-      return Response.json({ evaluated: results.length, outcomes: results.map((r) => r.outcome) });
-    }
-
+    // SECURITY (sage reflex#16 blocker): /status is INTERNAL — the Worker
+    // front forwards only /impulse/* from the public internet (worker.ts
+    // allowlist).
     if (url.pathname === "/status" && request.method === "GET") {
+      const heartbeat = await runtime.heartbeat.load();
       return Response.json({
         blueprints: runtime.store.current().length,
         busSubscriptions: runtime.busSource.active(),
-        scheduleExpressions: runtime.schedule.expressions(),
+        scheduleBlueprints: runtime.store.byKind("schedule").map((b) => b.id),
+        heartbeat: { lastTick: heartbeat.lastTick, periodMs: ALARM_PERIOD_MS },
         bus: runtime.bus.metrics(),
       });
     }
@@ -183,16 +185,26 @@ export class ReflexConsumer {
     return runtime.http.handle(request);
   }
 
-  /** Alarm = blueprint refresh from KV (edge hot-reload) + re-arm. */
+  /**
+   * Alarm = the scheduler heartbeat (F-002): evaluate due schedule blueprints
+   * over (lastTick, now], refresh blueprints from KV on cadence, persist
+   * lastTick, and re-arm. EdgeHeartbeat.onAlarm re-arms in its own finally;
+   * the catch below covers a hard failure BEFORE the heartbeat runs (e.g.
+   * startup) so the clock can never stop.
+   */
   async alarm(): Promise<void> {
     try {
       const runtime = await this.ensureStarted();
-      runtime.store.swap(await loadBlueprintsFromKV(this.env.REFLEX_BLUEPRINTS));
-      await runtime.busSource.sync();
+      const result = await runtime.heartbeat.onAlarm();
+      if (result.errors.length > 0) {
+        console.warn(`[reflex-edge] schedule tick: ${result.errors.length} blueprint error(s): ${JSON.stringify(result.errors)}`);
+      }
+      if (result.collapsed.length > 0) {
+        console.info(`[reflex-edge] schedule tick: collapsed ${result.collapsed.length} blueprint(s) after a gap`);
+      }
     } catch (error) {
-      console.error(`[reflex-edge] blueprint refresh failed (kept last good set): ${(error as Error).message}`);
-    } finally {
-      await this.state.storage.setAlarm(Date.now() + REFRESH_ALARM_MS);
+      console.error(`[reflex-edge] heartbeat failed before tick: ${(error as Error).message}`);
+      await this.state.storage.setAlarm(Date.now() + ALARM_PERIOD_MS);
     }
   }
 }

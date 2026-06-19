@@ -20,14 +20,14 @@ compatibility_date = "2026-06-01"
 # instead of riding a shim (dynamic imports or condition-gated paths can
 # still evade the build — the dry-run grep stays the real check).
 
-# Every distinct cron expression used by a schedule-kind Activation
-# Blueprint MUST appear here — Cron Triggers are the clock; Reflex maps
-# the fired expression back to blueprints by STRING equality (canonical
-# forms only). The DO /status route (internal) reports blueprint
-# expressions so drift is visible (EdgeScheduleSource.unmatchedExpressions);
-# a firing that matches zero blueprints warns loudly.
+# F-002 (reflex#20): reflex owns the schedule clock. A self-rescheduling
+# Durable Object alarm (EdgeHeartbeat) evaluates ALL schedule-kind Activation
+# Blueprints every ~60s via Scheduler.tick — so NO Cloudflare Cron Triggers
+# are consumed (the account-wide 5-cron cap no longer bounds how many distinct
+# schedules reflex can run). Adding a schedule blueprint needs no change here.
+# The DO /status route (internal) reports schedule blueprints + lastTick.
 [triggers]
-crons = ["0 7 * * *"]
+crons = []
 
 [[d1_databases]]
 binding = "REFLEX_DB"

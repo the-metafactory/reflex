@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import type { KVNamespace } from "@cloudflare/workers-types";
 import { BlueprintStore } from "../../src/activation/store";
 import type { ActivationBlueprint } from "../../src/activation/types";
-import { EdgeScheduleSource } from "../../src/edge/schedule";
 import { EdgeHttpSource } from "../../src/edge/http";
 import { loadBlueprintsFromKV } from "../../src/edge/kv-blueprints";
 import type { EvaluateResult, Impulse } from "../../src/pipeline/impulse";
@@ -99,36 +98,10 @@ describe("EdgeHttpSource", () => {
   });
 });
 
-describe("EdgeScheduleSource", () => {
-  const schedBp = (id: string, schedule: string): ActivationBlueprint =>
-    bp({ id, kind: "schedule", when: { schedule } });
-
-  it("evaluates only blueprints whose expression matches the fired cron", async () => {
-    const s = sink();
-    const store = new BlueprintStore([schedBp("daily", "0 7 * * *"), schedBp("hourly", "0 * * * *")]);
-    const source = new EdgeScheduleSource(store, s);
-    const results = await source.onScheduled({ cron: "0 7 * * *", scheduledTime: Date.parse("2026-06-11T07:00:00Z") });
-    expect(results.length).toBe(1);
-    expect(s.seen[0]!.blueprintId).toBe("daily");
-    expect(s.seen[0]!.kind).toBe("schedule");
-    expect(s.seen[0]!.payload.scheduled_for).toBe("2026-06-11T07:00:00.000Z");
-  });
-
-  it("no matching expression → zero evaluations", async () => {
-    const s = sink();
-    const source = new EdgeScheduleSource(new BlueprintStore([schedBp("daily", "0 7 * * *")]), s);
-    const results = await source.onScheduled({ cron: "*/5 * * * *", scheduledTime: Date.now() });
-    expect(results.length).toBe(0);
-    expect(s.seen.length).toBe(0);
-  });
-
-  it("reports blueprint expressions missing from the wrangler-declared cron list", () => {
-    const store = new BlueprintStore([schedBp("daily", "0 7 * * *"), schedBp("hourly", "0 * * * *")]);
-    const source = new EdgeScheduleSource(store, sink());
-    expect(source.unmatchedExpressions(["0 7 * * *"])).toEqual(["0 * * * *"]);
-    expect(source.unmatchedExpressions(["0 7 * * *", "0 * * * *"])).toEqual([]);
-  });
-});
+// Schedule evaluation moved off Cloudflare Cron Triggers (F-002): the
+// EdgeScheduleSource string-match path is gone — schedule firing is now the
+// pure Scheduler.tick core (see test/scheduler/core.test.ts) driven by the
+// DO-alarm heartbeat (see test/edge/heartbeat.test.ts).
 
 describe("loadBlueprintsFromKV", () => {
   const DOC = `schema: metafactory/activation/v1
