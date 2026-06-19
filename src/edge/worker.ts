@@ -1,4 +1,4 @@
-import type { DurableObjectNamespace, ExecutionContext, ScheduledController } from "@cloudflare/workers-types";
+import type { DurableObjectNamespace } from "@cloudflare/workers-types";
 import type { ReflexEdgeEnv } from "./consumer-do";
 
 export { ReflexConsumer } from "./consumer-do";
@@ -15,17 +15,20 @@ function consumer(env: WorkerEnv) {
 }
 
 /**
- * Reflex edge Worker (reflex#15): a stateless front that forwards both
- * impulse HTTP traffic and Cron Trigger firings into the ReflexConsumer
- * Durable Object, where the pipeline, guards, bus subscriptions, and
- * per-blueprint serialization live.
+ * Reflex edge Worker (reflex#15, F-002): a stateless front that forwards
+ * impulse HTTP traffic into the ReflexConsumer Durable Object, where the
+ * pipeline, guards, bus subscriptions, per-blueprint serialization, AND the
+ * scheduler heartbeat (a self-rescheduling DO alarm) live.
+ *
+ * There is deliberately NO `scheduled` handler: reflex owns the schedule
+ * clock via the DO alarm, so the Worker consumes zero Cloudflare Cron
+ * Triggers (F-002 / reflex#20).
  */
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
-    // PUBLIC ALLOWLIST (sage reflex#16 blocker): only the impulse surface
-    // is forwarded. /schedule and /status are the DO's internal protocol —
-    // an unauthenticated POST /schedule from the internet must never be
-    // able to trigger schedule blueprints outside Cloudflare Cron.
+    // PUBLIC ALLOWLIST (sage reflex#16 blocker): only the impulse surface is
+    // forwarded. /status is the DO's internal protocol and is not reachable
+    // from the public internet.
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/impulse/")) {
       return new Response(JSON.stringify({ error: "unknown path" }), {
@@ -34,18 +37,5 @@ export default {
       });
     }
     return consumer(env).fetch(request as never) as unknown as Promise<Response>;
-  },
-
-  async scheduled(controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
-    // Cloudflare's field is named `cron`; the canonical vocabulary
-    // (CONTEXT.md: Impulse Kind `schedule`, `cron` is an Avoid alias)
-    // takes over at this boundary.
-    ctx.waitUntil(
-      consumer(env).fetch("https://reflex-edge.internal/schedule", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ expression: controller.cron, scheduledTime: controller.scheduledTime }),
-      }) as unknown as Promise<Response>,
-    );
   },
 };
