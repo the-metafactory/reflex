@@ -504,7 +504,7 @@ describe("EdgeHeartbeat", () => {
 ## Constitutional Compliance
 
 - [x] **CLI-First:** the local path exposes a `reflex tick` entry the daemon timer (and an optional launchd/cron) invoke; scheduling is observable via the internal `/status` route. Deterministic-code-first, prompts-wrap-code holds — no LLM in the tick path.
-- [x] **Library-First:** `Scheduler.tick(lastTick, now)` is a pure, injectable core (`src/scheduler/core.ts`) reused by both the edge heartbeat adapter and the local daemon — no environment coupling in the core.
+- [x] **Library-First:** `Scheduler.tick(lastTick, now)` is a pure, injectable core (`src/scheduler/core.ts`) with no environment coupling. The edge heartbeat adapter wires it now; it is shaped for the local daemon to reuse, but for MVP the daemon keeps its existing R-105 in-process timer (routing local through the shared core is a tracked follow-up).
 - [x] **Test-First:** unit tests for `tick()` (window, collapse, DST, boundary, backward-clock, cold-start) authored before wiring; heartbeat persistence tested with a DO-storage shim.
 - [x] **Deterministic:** given `(lastTick, now)` + blueprint set, the fired set is a pure function (croner is deterministic). No randomness, no wall-clock reads inside the core (time is injected).
 - [x] **Code Before Prompts:** entirely deterministic code; no prompt surface.

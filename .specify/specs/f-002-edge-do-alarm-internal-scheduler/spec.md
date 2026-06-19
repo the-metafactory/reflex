@@ -47,7 +47,7 @@ Move scheduling **into reflex**. Factor out a single environment-agnostic core a
 | FR-1 | A `Scheduler.tick(now)` core evaluates ALL schedule-kind blueprints and fires each whose next croner occurrence ∈ `(lastTick, now]`, routing each as a `schedule` Impulse through the existing pipeline (R-104). | #20 |
 | FR-2 | On edge, a self-rescheduling DO alarm (default 60s) is the only clock; the deployment uses **zero** CF cron triggers (`wrangler.toml [triggers]` empty). | Heartbeat decision |
 | FR-3 | The DO alarm unifies scheduling with the existing KV blueprint refresh: each tick refreshes blueprints (every Nth tick, default every 5 min) and runs `tick(now)`. | Current alarm |
-| FR-4 | `lastTick` is persisted in DO storage (edge) / daemon state (local) so the window survives restart/eviction and no tick is silently lost. | Catch-up decision |
+| FR-4 | `lastTick` is persisted in DO storage so the window survives restart/eviction and no tick is silently lost. (Edge MVP. The local daemon keeps its in-process R-105 timer for now; routing it through the shared core + persisting its own `lastTick` is a follow-up.) | Catch-up decision |
 | FR-5 | **Collapse catch-up:** when a gap spans multiple occurrences of a blueprint, it fires **exactly once** that tick, regardless of how many occurrences were missed. | Catch-up decision |
 | FR-6 | Croner honors each blueprint's `timezone` (IANA); absent timezone defaults to UTC. Fixes the edge UTC-only gap. | #20 |
 | FR-7 | Local daemon keeps a working trigger path: the in-process timer drives `tick(now)`; an every-minute launchd/cron `reflex tick` is a documented alternative. | Migration answer |
@@ -62,7 +62,7 @@ Move scheduling **into reflex**. Factor out a single environment-agnostic core a
 | NFR-2 | Exactly-once per tick at window boundaries: the half-open `(lastTick, now]` interval fires a blueprint due exactly at a boundary once (no double-fire, no skip). Existing run-lock / cooldown / idempotency guards still apply. | #20 |
 | NFR-3 | A single heartbeat scales to unbounded schedule blueprints with no additional CF cron-trigger consumption. | #20 |
 | NFR-4 | Cost: 60s alarm ≈ 1440 invocations/day — negligible; no measurable D1/KV pressure beyond the existing refresh. | #20 |
-| NFR-5 | Core logic is environment-agnostic and shares the croner path with R-105 (no edge/local scheduling divergence). | Architecture |
+| NFR-5 | Core logic is environment-agnostic and uses the same croner matcher as R-105. (The edge wires the shared core now; the local daemon still runs its own R-105 timer for MVP, so full edge/local convergence is a follow-up.) | Architecture |
 
 ## User Experience
 
@@ -81,7 +81,7 @@ Move scheduling **into reflex**. Factor out a single environment-agnostic core a
 | Clock skew / non-monotonic `now` | `now <= lastTick` → no-op tick (never fire backwards); guarded. |
 | Blueprint added between ticks | Picked up on next refresh; first eligible occurrence after its load fires. |
 | DST transition | Croner timezone handling; an occurrence skipped/duplicated by DST follows croner semantics, documented. |
-| Two overlapping ticks (alarm + manual) | `tick(now)` is single-flight; `lastTick` CAS so concurrent ticks don't double-fire. |
+| Two overlapping ticks (alarm + manual) | The Durable Object runtime serializes alarm and fetch handlers (single-threaded execution + storage input gates), so ticks never run concurrently — no double-fire. The guarantee comes from the DO model, not an explicit CAS in `tick()`. |
 | Heartbeat period change | Resolution changes; `lastTick` window math unaffected (time-based, not count-based). |
 
 ## Success Criteria

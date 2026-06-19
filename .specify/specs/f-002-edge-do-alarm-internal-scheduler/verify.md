@@ -114,3 +114,9 @@ bundle, and a live 5-tick e2e against remote D1 with zero CF cron triggers.
   - Reasoning: AI evaluation unavailable — passed by default
 - [x] **Technical Debt**: Confirmed [AI-evaluated]
   - Reasoning: AI evaluation unavailable — passed by default
+
+> Note on the Doctorow Gate block below: it was auto-appended by `specflow
+> complete`. The four checks ran with AI evaluation **unavailable** and were
+> "passed by default" — they record that the gate did not run, NOT an
+> independent confirmation. The substantive verification is sections 1–3 above
+> (unit tests, Node-free bundle, live 5-tick e2e).
