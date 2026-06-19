@@ -65,14 +65,25 @@ export class Scheduler {
     // `now` (matches the local daemon R-105 "most recent tick NOT backfilled").
     const from = lastTick ?? new Date(now.getTime() - 1);
 
-    // Phase 1 (sync): croner matching — which blueprints are due, and how many
-    // occurrences collapsed. No awaits here, so this is cheap and ordered.
+    const due = this.collectDue(from, now, result);
+    await this.evaluateDue(due, result);
+    return result;
+  }
+
+  /**
+   * Phase 1 (sync): croner matching. Returns the due blueprints (one impulse
+   * each) and records collapsed counts + bad-expression errors into `result`.
+   * No awaits → cheap and deterministically ordered by the store.
+   */
+  private collectDue(from: Date, now: Date, result: TickResult): Array<{ id: string; impulse: Impulse }> {
     const due: Array<{ id: string; impulse: Impulse }> = [];
     for (const blueprint of this.options.store.byKind("schedule")) {
       const when = blueprint.when as ScheduleWhen;
       try {
-        // No handler → inert query object; never schedules a timer.
-        const cron = new Cron(when.schedule, { timezone: when.timezone });
+        // No handler → inert query object; never schedules a timer. Absent
+        // timezone defaults to UTC (NOT croner's runtime-local default), so a
+        // blueprint fires at the same instant on every runtime.
+        const cron = new Cron(when.schedule, { timezone: when.timezone ?? "UTC" });
         const firstDue = cron.nextRun(from);
         if (!firstDue || firstDue.getTime() > now.getTime()) continue; // not due this window
 
@@ -101,12 +112,17 @@ export class Scheduler {
         result.errors.push({ blueprintId: blueprint.id, error: (error as Error).message });
       }
     }
+    return due;
+  }
 
-    // Phase 2: evaluate due blueprints with BOUNDED PARALLELISM (parity with the
-    // deleted edge path) — distinct blueprints are independent (the pipeline
-    // serializes per blueprint internally), so one slow blueprint must not delay
-    // the others in the window. Results are collected in `due` order so
-    // `evaluated`/`errors` stay deterministic.
+  /**
+   * Phase 2: evaluate due blueprints with BOUNDED PARALLELISM (parity with the
+   * deleted edge path) — distinct blueprints are independent (the pipeline
+   * serializes per blueprint internally), so one slow blueprint must not delay
+   * the others in the window. Results are collected in `due` order so
+   * `evaluated`/`errors` stay deterministic.
+   */
+  private async evaluateDue(due: Array<{ id: string; impulse: Impulse }>, result: TickResult): Promise<void> {
     for (let i = 0; i < due.length; i += MAX_EVAL_CONCURRENCY) {
       const chunk = due.slice(i, i + MAX_EVAL_CONCURRENCY);
       const settled = await Promise.allSettled(chunk.map((d) => this.options.sink.evaluate(d.impulse)));
@@ -116,7 +132,5 @@ export class Scheduler {
         else result.errors.push({ blueprintId: id, error: (outcome.reason as Error).message });
       });
     }
-
-    return result;
   }
 }

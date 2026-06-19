@@ -1,24 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import type { DurableObjectState } from "@cloudflare/workers-types";
 import { BlueprintStore } from "../../src/activation/store";
-import type { ActivationBlueprint } from "../../src/activation/types";
 import type { EvaluateResult, Impulse } from "../../src/pipeline/impulse";
 import { Scheduler } from "../../src/scheduler/core";
 import { EdgeHeartbeat, REFRESH_EVERY_TICKS } from "../../src/edge/heartbeat";
-
-function scheduleBp(id: string, cron = "* * * * *"): ActivationBlueprint {
-  return {
-    id,
-    target: `@jc/${id}`,
-    kind: "schedule",
-    when: { schedule: cron },
-    policy: "auto",
-    approvalTimeoutMs: 3_600_000,
-    guards: {},
-    payload: {},
-    sourceFile: "/tmp/x.yaml",
-  };
-}
+import { scheduleBlueprint as scheduleBp } from "../helpers";
 
 /** In-memory DurableObjectState storage shim; records setAlarm calls. */
 function fakeState() {

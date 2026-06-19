@@ -2,6 +2,22 @@ import { createEnvelope } from "@the-metafactory/myelin";
 import type { MyelinEnvelope } from "@the-metafactory/myelin";
 import type { EnvelopePublishInput } from "@the-metafactory/myelin";
 import type { ReflexConfig } from "../src/config/schema";
+import type { ActivationBlueprint } from "../src/activation/types";
+
+/** Shared schedule-kind blueprint fixture for scheduler/heartbeat tests. */
+export function scheduleBlueprint(id: string, schedule = "* * * * *", timezone?: string): ActivationBlueprint {
+  return {
+    id,
+    target: `@jc/${id}`,
+    kind: "schedule",
+    when: { schedule, ...(timezone ? { timezone } : {}) },
+    policy: "auto",
+    approvalTimeoutMs: 3_600_000,
+    guards: {},
+    payload: {},
+    sourceFile: "/tmp/x.yaml",
+  };
+}
 
 export function testConfig(overrides: Partial<ReflexConfig> = {}): ReflexConfig {
   return {

@@ -19,10 +19,11 @@ export interface HeartbeatState {
 
 /**
  * Edge heartbeat adapter (F-002, reflex#20). A self-rescheduling Durable
- * Object alarm is the ONLY clock — zero Cloudflare Cron Triggers. Durable
- * across DO eviction (alarms are guaranteed-delivery, retried) and
- * self-healing (each fire arms the next). Unifies schedule evaluation with
- * the DO's pre-existing KV blueprint-refresh cadence.
+ * Object alarm is the ONLY clock — zero Cloudflare Cron Triggers. Self-healing:
+ * each fire arms the next. This relies on the Cloudflare DO Alarms contract
+ * (alarms are documented as guaranteed-delivery and retried, surviving
+ * eviction) — that durability is an external platform property, not enforced
+ * here. Unifies schedule evaluation with the DO's KV blueprint-refresh cadence.
  */
 export class EdgeHeartbeat {
   constructor(
@@ -64,9 +65,11 @@ export class EdgeHeartbeat {
       try {
         await this.onRefresh();
       } catch (error) {
-        // Keep the last-good blueprint set; a transient KV/bus error must not
-        // skip scheduling or stop the heartbeat.
-        console.error(`[reflex-heartbeat] blueprint refresh failed (kept last good set): ${(error as Error).message}`);
+        // Continue with whatever blueprint set is already in memory and keep
+        // the heartbeat running. NOTE: this does not guarantee schedules are
+        // current — if the very first refresh fails the set may be empty, and
+        // a later failure leaves a stale set until the next successful refresh.
+        console.error(`[reflex-heartbeat] blueprint refresh failed (using in-memory set): ${(error as Error).message}`);
       }
       heartbeat.refreshCounter = REFRESH_EVERY_TICKS;
     }

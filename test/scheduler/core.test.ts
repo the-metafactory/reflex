@@ -1,22 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { BlueprintStore } from "../../src/activation/store";
-import type { ActivationBlueprint } from "../../src/activation/types";
 import type { EvaluateResult, Impulse } from "../../src/pipeline/impulse";
 import { Scheduler } from "../../src/scheduler/core";
-
-function scheduleBp(id: string, cron: string, timezone?: string): ActivationBlueprint {
-  return {
-    id,
-    target: `@jc/${id}`,
-    kind: "schedule",
-    when: { schedule: cron, ...(timezone ? { timezone } : {}) },
-    policy: "auto",
-    approvalTimeoutMs: 3_600_000,
-    guards: {},
-    payload: {},
-    sourceFile: "/tmp/x.yaml",
-  };
-}
+import { scheduleBlueprint as scheduleBp } from "../helpers";
 
 function sink(behavior?: (impulse: Impulse) => Promise<EvaluateResult>) {
   const impulses: Impulse[] = [];
