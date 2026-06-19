@@ -56,27 +56,32 @@ export class Scheduler {
    * @param now inclusive upper bound (injected current time).
    */
   async tick(lastTick: Date | null, now: Date): Promise<TickResult> {
-    const result: TickResult = { evaluated: [], collapsed: [], errors: [] };
-
     // Backward / non-monotonic clock: never fire into the past.
-    if (lastTick && now.getTime() <= lastTick.getTime()) return result;
+    if (lastTick && now.getTime() <= lastTick.getTime()) {
+      return { evaluated: [], collapsed: [], errors: [] };
+    }
 
     // Cold start does NOT backfill: treat the window as the instant before
     // `now` (matches the local daemon R-105 "most recent tick NOT backfilled").
     const from = lastTick ?? new Date(now.getTime() - 1);
 
-    const due = this.collectDue(from, now, result);
-    await this.evaluateDue(due, result);
-    return result;
+    const { due, collapsed, errors: matchErrors } = this.collectDue(from, now);
+    const { evaluated, errors: evalErrors } = await this.evaluateDue(due);
+    return { evaluated, collapsed, errors: [...matchErrors, ...evalErrors] };
   }
 
   /**
    * Phase 1 (sync): croner matching. Returns the due blueprints (one impulse
-   * each) and records collapsed counts + bad-expression errors into `result`.
-   * No awaits → cheap and deterministically ordered by the store.
+   * each), the collapsed counts, and any bad-expression errors — a pure value,
+   * no shared accumulator. No awaits → cheap and ordered by the store.
    */
-  private collectDue(from: Date, now: Date, result: TickResult): Array<{ id: string; impulse: Impulse }> {
+  private collectDue(
+    from: Date,
+    now: Date,
+  ): { due: Array<{ id: string; impulse: Impulse }>; collapsed: TickResult["collapsed"]; errors: TickResult["errors"] } {
     const due: Array<{ id: string; impulse: Impulse }> = [];
+    const collapsed: TickResult["collapsed"] = [];
+    const errors: TickResult["errors"] = [];
     for (const blueprint of this.options.store.byKind("schedule")) {
       const when = blueprint.when as ScheduleWhen;
       try {
@@ -94,7 +99,7 @@ export class Scheduler {
           missed++;
           probe = cron.nextRun(probe);
         }
-        if (missed > 0) result.collapsed.push({ blueprintId: blueprint.id, missedOccurrences: missed });
+        if (missed > 0) collapsed.push({ blueprintId: blueprint.id, missedOccurrences: missed });
 
         due.push({
           id: blueprint.id,
@@ -109,28 +114,33 @@ export class Scheduler {
       } catch (error) {
         // A bad cron expression should never have loaded (schema validates),
         // but never let one blueprint break the whole tick.
-        result.errors.push({ blueprintId: blueprint.id, error: (error as Error).message });
+        errors.push({ blueprintId: blueprint.id, error: (error as Error).message });
       }
     }
-    return due;
+    return { due, collapsed, errors };
   }
 
   /**
    * Phase 2: evaluate due blueprints with BOUNDED PARALLELISM (parity with the
    * deleted edge path) — distinct blueprints are independent (the pipeline
    * serializes per blueprint internally), so one slow blueprint must not delay
-   * the others in the window. Results are collected in `due` order so
-   * `evaluated`/`errors` stay deterministic.
+   * the others in the window. Returns `evaluated`/`errors` in `due` order so
+   * the result stays deterministic.
    */
-  private async evaluateDue(due: Array<{ id: string; impulse: Impulse }>, result: TickResult): Promise<void> {
+  private async evaluateDue(
+    due: Array<{ id: string; impulse: Impulse }>,
+  ): Promise<{ evaluated: string[]; errors: TickResult["errors"] }> {
+    const evaluated: string[] = [];
+    const errors: TickResult["errors"] = [];
     for (let i = 0; i < due.length; i += MAX_EVAL_CONCURRENCY) {
       const chunk = due.slice(i, i + MAX_EVAL_CONCURRENCY);
       const settled = await Promise.allSettled(chunk.map((d) => this.options.sink.evaluate(d.impulse)));
       settled.forEach((outcome, j) => {
         const { id } = chunk[j]!;
-        if (outcome.status === "fulfilled") result.evaluated.push(id);
-        else result.errors.push({ blueprintId: id, error: (outcome.reason as Error).message });
+        if (outcome.status === "fulfilled") evaluated.push(id);
+        else errors.push({ blueprintId: id, error: (outcome.reason as Error).message });
       });
     }
+    return { evaluated, errors };
   }
 }
