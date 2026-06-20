@@ -1,0 +1,41 @@
+# GitHub-watch Activation Blueprint: fire when an ISSUE is opened on a watched
+# repo — driven directly by GitHub's signed HTTP delivery, no laptop in the
+# loop. (GitHub's delivery is an HTTP Impulse to reflex.) Pairs with the cortex
+# F-6 reflex-activation bridge + the `notify.discord` code capability: the
+# `fired` event → cortex bridge → `tasks.@…notify.discord` → per-repo Discord
+# webhook post. End to end: new GitHub issue → Discord, laptop offline.
+#
+# Target: `@jc/notify-discord` — cortex.yaml maps this to capability
+# `notify.discord` with `handler: discord-webhook` (see cortex
+# `reflex_activation.targets` + `notify.discord` repo→webhook map).
+#
+# Deploy (reflex-edge):
+#   1. Deploy reflex-edge.
+#   2. `wrangler secret put GITHUB_WEBHOOK_SECRET`  (shared HMAC secret)
+#   3. Load this blueprint into KV (one document per key under `activation/`):
+#        wrangler kv key put --binding=REFLEX_BLUEPRINTS \
+#          activation/github-issue-opened "$(cat examples/github-issue-opened/reflex.yaml)"
+#   4. GitHub repo → Settings → Webhooks → Add:
+#        Payload URL:  https://<reflex-edge-host>/impulse/github-issue-opened
+#        Content type: application/json
+#        Secret:       <same value as GITHUB_WEBHOOK_SECRET>
+#        Events:       Issues
+#
+# The source verifies X-Hub-Signature-256 (HMAC-SHA256 of the raw body) and
+# injects top-level github_event / repository (full_name) / github_delivery so
+# the flat `where` matcher can target precise events.
+schema: metafactory/activation/v1
+activations:
+  - id: github-issue-opened
+    target: "@jc/notify-discord"     # cortex maps → capability notify.discord
+    when:
+      http:
+        auth:
+          mode: github_hmac
+          secret_env: GITHUB_WEBHOOK_SECRET   # Worker secret BINDING name
+        where:
+          github_event: issues                # from the X-GitHub-Event header
+          action: opened                      # flat top-level payload field
+    policy: auto
+    guards:
+      cooldown: 10s                  # collapse a burst of redeliveries
