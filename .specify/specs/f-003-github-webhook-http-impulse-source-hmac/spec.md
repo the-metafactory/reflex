@@ -96,7 +96,7 @@ Add a **GitHub-HMAC auth mode** + a **`where` matcher** to the edge HTTP impulse
 - Non-GitHub HMAC providers (the `auth` block is general but only `bearer`/`github_hmac` modes ship here).
 
 ## Open Questions
-- [ ] Does the local daemon's `Bun.serve` http source (R-109) also get the `auth`/`where`/HMAC additions, or edge-only for MVP?
+- [x] Local daemon `Bun.serve` http source (R-109) parity? **Decided: edge-only for MVP.** The shared schema accepts `auth`/`where`, and the local source honors `auth:{mode:bearer}` (≡ `token_env`) but **fails loud with 501** on `github_hmac`/`where` (the contract is not silently violated). Full local parity is a tracked follow-up.
 - [ ] `where` semantics for nested matches beyond the two injected fields — top-level only for v1?
 
 ## Assumptions

@@ -43,6 +43,9 @@ beforeAll(() => {
     httpBp("bulk"),
     httpBp("bytes"),
     httpBp("broken", { when: { http: { token_env: "DEFINITELY_UNSET_ENV" } } }),
+    httpBp("authbearer", { when: { http: { auth: { mode: "bearer", secret_env: "HTTP_TEST_TOKEN" } } } }),
+    httpBp("ghhmac", { when: { http: { auth: { mode: "github_hmac", secret_env: "HTTP_TEST_TOKEN" } } } }),
+    httpBp("filtered", { when: { http: { token_env: "HTTP_TEST_TOKEN", where: { action: "opened" } } } }),
   ]);
   const bus = createReflexBus(testConfig(), { transport: createTransport({ type: "memory" }) });
   const pipeline = new Pipeline({ store, repo, bus });
@@ -104,6 +107,19 @@ describe("response-code matrix", () => {
   it("503 for a route whose token_env is unset", async () => {
     const r = await call("/impulse/broken", {}, "anything");
     expect(r.status).toBe(503);
+  });
+
+  it("auth: { mode: bearer } resolves the secret like token_env (202)", async () => {
+    expect((await call("/impulse/authbearer")).status).toBe(202);
+  });
+
+  it("github_hmac is edge-only on the local source → 501", async () => {
+    // Valid Bearer token presented, but the blueprint requests github_hmac.
+    expect((await call("/impulse/ghhmac")).status).toBe(501);
+  });
+
+  it("where filtering is edge-only on the local source → 501", async () => {
+    expect((await call("/impulse/filtered")).status).toBe(501);
   });
 
   it("202 carries an honest blocked verdict (cooldown)", async () => {

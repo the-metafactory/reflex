@@ -91,7 +91,28 @@ export class HttpSource {
     // is never observable without a valid token.
     const presented = bearerOf(request);
     const blueprint = this.store.get(blueprintId);
-    const tokenEnv = blueprint && blueprint.kind === "http" ? (blueprint.when as HttpWhen).http.token_env : undefined;
+    const httpWhen = blueprint && blueprint.kind === "http" ? (blueprint.when as HttpWhen).http : undefined;
+
+    // F-003 parity boundary: `github_hmac` auth and `where` filtering are
+    // implemented on the EDGE http source only (reflex#23). The schema is
+    // shared, so a blueprint can declare them here — but this local Bun.serve
+    // source does not honor them. Fail LOUD (501) instead of silently
+    // mis-handling the contract; local parity is a tracked follow-up. (auth
+    // precedes this check would leak existence, but an unsupported-feature 501
+    // reveals only a runtime capability gap, not the credential.)
+    if (httpWhen && (httpWhen.where || httpWhen.auth?.mode === "github_hmac")) {
+      if (!this.misconfigWarned.has(blueprintId)) {
+        this.misconfigWarned.add(blueprintId);
+        console.error(
+          `[reflex-http] ${blueprintId}: github_hmac/where are edge-only (reflex#23) — the local daemon http source does not implement them; route disabled (501)`,
+        );
+      }
+      return json(501, { error: "auth mode / where not implemented on the local http source — edge-only (reflex#23)" });
+    }
+
+    // Bearer secret binding: `auth: { mode: bearer, secret_env }` is the
+    // general form; `token_env` is the shorthand. Both resolve from env here.
+    const tokenEnv = httpWhen?.auth?.mode === "bearer" ? httpWhen.auth.secret_env : httpWhen?.token_env;
     const expected = tokenEnv ? process.env[tokenEnv] : undefined;
 
     if (blueprint && blueprint.kind === "http" && tokenEnv && expected === undefined) {
