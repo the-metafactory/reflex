@@ -40,7 +40,7 @@ Add a **GitHub-HMAC auth mode** + a **`where` matcher** to the edge HTTP impulse
 | FR-2 | `token_env` remains valid as a Bearer shorthand (`≡ auth:{mode:bearer, secret_env}`); existing Bearer blueprints are unchanged. Bearer and github_hmac are mutually exclusive per blueprint. | Back-compat |
 | FR-3 | Auth-before-existence parity (R-109): a request that fails HMAC (or is missing the signature) gets `401`, indistinguishable from a missing/misconfigured blueprint. | `http.ts` parity |
 | FR-4 | In github_hmac mode the source injects top-level `github_event` (from `X-GitHub-Event`) and `repository` (`payload.repository.full_name`) into the impulse payload before matching and forwards them downstream. | Filtering + payload |
-| FR-5 | Optional `when.http.where` (flat field-equals over top-level payload fields, reusing the bus matcher) filters which deliveries fire; absent `where` = fire on every authenticated delivery. A non-match is an Ignored Decision (no fire), counted like bus ignores. | Filtering decision |
+| FR-5 | Optional `when.http.where` (flat field-equals over top-level payload fields, reusing the bus matcher) filters which deliveries fire; absent `where` = fire on every authenticated delivery. A non-match returns a `202 {outcome: "ignored", reason: "no-match"}` response and does NOT reach the pipeline (no Decision row recorded) — unlike the bus source, which coalesces ignored counters; the http source does not persist per-delivery ignores in v1. | Filtering decision |
 | FR-6 | The impulse payload is the full GitHub JSON plus injected `github_event` + `repository`; `kind: "http"`, attributed to the blueprint. | Payload decision |
 | FR-7 | `X-GitHub-Delivery` is used as the idempotency key in github_hmac mode so redelivered webhooks fire once. | Dedup decision |
 | FR-8 | The existing Bearer path (auth, rate limit, body bounds, 202 verdict) is behaviorally unchanged. | Back-compat |
@@ -68,7 +68,7 @@ Add a **GitHub-HMAC auth mode** + a **`where` matcher** to the edge HTTP impulse
 | Bad/missing `X-Hub-Signature-256` | 401, indistinguishable from missing blueprint (auth-before-existence) |
 | Secret binding unset | 401 (route disabled), logged once |
 | GitHub redelivery (same `X-GitHub-Delivery`) | fires once (idempotency key) |
-| Event type not matched by `where` | 202 Ignored Decision, no fire |
+| Event type not matched by `where` | 202 `{outcome: ignored, reason: no-match}` response, no fire, no Decision recorded |
 | Body exceeds 256 KB | 413 (existing bound) — HMAC not attempted on truncated bytes |
 | Payload missing `repository` (e.g. `ping`) | `repository` injected as absent/undefined; `where` on it simply won't match |
 | `action`-less GitHub event (push/ping) | `where` on `action` won't match; `github_event` still matchable |

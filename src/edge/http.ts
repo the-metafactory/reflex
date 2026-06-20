@@ -177,20 +177,11 @@ export class EdgeHttpSource {
     let bytes: Uint8Array | null = null;
     if (expected !== undefined) {
       if (mode === "github_hmac") {
-        // Read the body only when a signature header is present (an
-        // unsigned caller never triggers a body read). An oversize body
-        // can't be verified within the bound → unauthorized (401), no leak.
-        const sigHeader = request.headers.get("x-hub-signature-256");
-        if (sigHeader) {
-          const read = await readBoundedBytes(request, MAX_BODY_BYTES);
-          if (read !== null) {
-            authOk = await verifyGithubSignature(read, expected, sigHeader);
-            if (authOk) bytes = read; // verified raw bytes reused by handle()
-          }
-        }
+        const r = await authorizeGithubHmac(request, expected);
+        if (r instanceof Response) return r; // 413 — oversize signed body
+        ({ authOk, bytes } = r);
       } else if (mode === "bearer") {
-        const presented = bearerOf(request);
-        authOk = !!presented && constantTimeEquals(presented, expected); // header-only; no body read
+        authOk = authorizeBearer(request, expected); // header-only; no body read
       }
     }
     if (!authOk) return json(401, { error: "unauthorized" });
@@ -225,6 +216,33 @@ function authModeOf(httpWhen: HttpWhen["http"]): HttpAuthMode | undefined {
   if (httpWhen.auth) return httpWhen.auth.mode;
   if (httpWhen.token_env) return "bearer";
   return undefined;
+}
+
+/** Bearer auth — header-only (no body read). Constant-time token compare. */
+function authorizeBearer(request: Request, expected: string): boolean {
+  const presented = bearerOf(request);
+  return !!presented && constantTimeEquals(presented, expected);
+}
+
+/**
+ * GitHub-HMAC auth. Reads the body only when a signature header is present (an
+ * unsigned caller never triggers a body read → caller-side 401). A signed but
+ * oversize body cannot be verified within the bound → 413 (the honest signal;
+ * real GitHub payloads can exceed the cap). Returns the verified raw bytes on
+ * success so handle() reuses them (HMAC is over the EXACT received bytes).
+ */
+async function authorizeGithubHmac(
+  request: Request,
+  expected: string,
+): Promise<{ authOk: boolean; bytes: Uint8Array | null } | Response> {
+  const sigHeader = request.headers.get("x-hub-signature-256");
+  if (!sigHeader) return { authOk: false, bytes: null }; // unsigned → 401, no body read
+  const declared = Number(request.headers.get("content-length") ?? 0);
+  if (declared > MAX_BODY_BYTES) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
+  const read = await readBoundedBytes(request, MAX_BODY_BYTES);
+  if (read === null) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
+  const authOk = await verifyGithubSignature(read, expected, sigHeader);
+  return { authOk, bytes: authOk ? read : null };
 }
 
 function bearerOf(request: Request): string | null {

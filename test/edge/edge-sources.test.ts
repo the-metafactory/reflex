@@ -175,6 +175,18 @@ describe("EdgeHttpSource — github_hmac (F-003)", () => {
     expect((await source.handle(req)).status).toBe(401);
   });
 
+  it("signed but oversize body → 413 (not 401)", async () => {
+    const source = new EdgeHttpSource(new BlueprintStore([ghBp()]), sink(), { GH: SECRET });
+    const big = JSON.stringify({ action: "opened", pad: "x".repeat(300 * 1024) });
+    const sig = await sign(SECRET, big);
+    const res = await source.handle(ghPost(big, {
+      "x-hub-signature-256": sig,
+      "x-github-event": "pull_request",
+      "content-length": String(300 * 1024),
+    }));
+    expect(res.status).toBe(413);
+  });
+
   it("where filter: non-matching event → 202 ignored, not fired", async () => {
     const s = sink();
     const source = new EdgeHttpSource(new BlueprintStore([ghBp({ github_event: "pull_request", action: "opened" })]), s, { GH: SECRET });
