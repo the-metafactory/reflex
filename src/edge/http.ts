@@ -62,21 +62,15 @@ export class EdgeHttpSource {
     if (request.method !== "POST") return json(405, { error: "POST only" });
     const blueprintId = match[1]!;
 
-    // Body-shape gates (mode-independent — leak no existence/auth info).
-    if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
-      return json(415, { error: "content-type must be application/json" });
-    }
-    const declared = Number(request.headers.get("content-length") ?? 0);
-    if (declared > MAX_BODY_BYTES) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
-
-    // Read the raw bytes ONCE: github_hmac verifies over these exact bytes,
-    // and the JSON body is parsed from the same bytes (never re-serialized).
-    const bytes = await readBoundedBytes(request, MAX_BODY_BYTES);
-    if (bytes === null) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
-
-    const authed = await this.authorize(request, blueprintId, bytes);
+    // AUTH FIRST (R-109 FR-6): nothing else — body-shape errors, existence, or
+    // body buffering — happens before a valid credential. The Bearer path
+    // authorizes on the header alone (no body read for rejected callers);
+    // github_hmac must read the body to verify, so it reads ONLY after the
+    // signature header + secret are present. `bytes` is the verified raw body
+    // (github_hmac) or null (bearer, body read after auth).
+    const authed = await this.authorize(request, blueprintId);
     if (authed instanceof Response) return authed;
-    const blueprint = authed;
+    const { blueprint, bytes: verifiedBytes } = authed;
 
     if (!this.takeToken(blueprintId)) {
       const retryAfter = Math.ceil(60 / this.rateLimit);
@@ -84,6 +78,20 @@ export class EdgeHttpSource {
         status: 429,
         headers: { "content-type": "application/json", "retry-after": String(retryAfter) },
       });
+    }
+
+    // Body-shape gates run AFTER auth. github_hmac already holds verified bytes;
+    // bearer reads the body now (so rejected bearer callers never buffered it).
+    let bytes = verifiedBytes;
+    if (bytes === null) {
+      if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
+        return json(415, { error: "content-type must be application/json" });
+      }
+      const declared = Number(request.headers.get("content-length") ?? 0);
+      if (declared > MAX_BODY_BYTES) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
+      const read = await readBoundedBytes(request, MAX_BODY_BYTES);
+      if (read === null) return json(413, { error: `body exceeds ${MAX_BODY_BYTES} bytes` });
+      bytes = read;
     }
 
     const raw = new TextDecoder().decode(bytes);
@@ -136,17 +144,18 @@ export class EdgeHttpSource {
   }
 
   /**
-   * Auth + existence resolution (R-109 FR-6, tightened per sage reflex#16):
+   * Auth + existence resolution (R-109 FR-6, tightened per sage reflex#16/#24):
    * a caller without a VALID credential always sees 401 — including for missing
    * blueprints (no secret → auth fails) and misconfigured routes (secret binding
    * unset, logged once). Only a VALID credential against a non-http/missing
-   * blueprint reveals 404. Returns the resolved http blueprint on success.
+   * blueprint reveals 404. Returns the resolved http blueprint plus, for
+   * github_hmac, the verified raw body bytes (read here because HMAC requires
+   * them); bearer returns `bytes: null` so the body is read only after auth.
    */
   private async authorize(
     request: Request,
     blueprintId: string,
-    bytes: Uint8Array,
-  ): Promise<ActivationBlueprint | Response> {
+  ): Promise<{ blueprint: ActivationBlueprint; bytes: Uint8Array | null } | Response> {
     const blueprint = this.store.get(blueprintId);
     const httpWhen = blueprint && blueprint.kind === "http" ? (blueprint.when as HttpWhen).http : undefined;
     const mode = httpWhen ? authModeOf(httpWhen) : undefined;
@@ -165,12 +174,23 @@ export class EdgeHttpSource {
     }
 
     let authOk = false;
+    let bytes: Uint8Array | null = null;
     if (expected !== undefined) {
       if (mode === "github_hmac") {
-        authOk = await verifyGithubSignature(bytes, expected, request.headers.get("x-hub-signature-256"));
+        // Read the body only when a signature header is present (an
+        // unsigned caller never triggers a body read). An oversize body
+        // can't be verified within the bound → unauthorized (401), no leak.
+        const sigHeader = request.headers.get("x-hub-signature-256");
+        if (sigHeader) {
+          const read = await readBoundedBytes(request, MAX_BODY_BYTES);
+          if (read !== null) {
+            authOk = await verifyGithubSignature(read, expected, sigHeader);
+            if (authOk) bytes = read; // verified raw bytes reused by handle()
+          }
+        }
       } else if (mode === "bearer") {
         const presented = bearerOf(request);
-        authOk = !!presented && constantTimeEquals(presented, expected);
+        authOk = !!presented && constantTimeEquals(presented, expected); // header-only; no body read
       }
     }
     if (!authOk) return json(401, { error: "unauthorized" });
@@ -180,7 +200,7 @@ export class EdgeHttpSource {
       this.misconfigWarned.delete(blueprintId);
       return json(404, { error: `no http Activation Blueprint "${blueprintId}" loaded` });
     }
-    return blueprint;
+    return { blueprint, bytes };
   }
 
   /** Continuous-refill token bucket per blueprint — per isolate (see class doc). */
@@ -230,8 +250,12 @@ async function verifyGithubSignature(bytes: Uint8Array, secret: string, header: 
     ["sign"],
   );
   const sig = await crypto.subtle.sign("HMAC", key, new Uint8Array(bytes));
-  const actualHex = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  return constantTimeEquals(actualHex, expectedHex);
+  return constantTimeEquals(bytesToHex(new Uint8Array(sig)), expectedHex);
+}
+
+/** Lowercase hex of a byte array (the GitHub signature encoding). */
+export function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /**

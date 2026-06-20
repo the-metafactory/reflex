@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { KVNamespace } from "@cloudflare/workers-types";
 import { BlueprintStore } from "../../src/activation/store";
 import type { ActivationBlueprint } from "../../src/activation/types";
-import { EdgeHttpSource } from "../../src/edge/http";
+import { EdgeHttpSource, bytesToHex } from "../../src/edge/http";
 import { loadBlueprintsFromKV } from "../../src/edge/kv-blueprints";
 import type { EvaluateResult, Impulse } from "../../src/pipeline/impulse";
 
@@ -111,7 +111,7 @@ describe("EdgeHttpSource — github_hmac (F-003)", () => {
   async function sign(secret: string, body: string): Promise<string> {
     const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
-    return "sha256=" + [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return "sha256=" + bytesToHex(new Uint8Array(sig));
   }
 
   function ghPost(body: string, headers: Record<string, string>): Request {
@@ -161,6 +161,18 @@ describe("EdgeHttpSource — github_hmac (F-003)", () => {
     const source = new EdgeHttpSource(new BlueprintStore([ghBp()]), sink(), {});
     const sig = await sign(SECRET, PR_BODY);
     expect((await source.handle(ghPost(PR_BODY, { "x-hub-signature-256": sig, "x-github-event": "pull_request" }))).status).toBe(401);
+  });
+
+  it("auth precedes body-shape: bad bearer token with non-JSON body → 401, not 415 (R-109 FR-6)", async () => {
+    // Bearer blueprint; wrong token + wrong content-type. Must be 401 (auth
+    // first), never 415 — and the body is never read for a rejected caller.
+    const source = new EdgeHttpSource(new BlueprintStore([bp({})]), sink(), { TOK: "s3cret" });
+    const req = new Request("https://reflex.example/impulse/bp", {
+      method: "POST",
+      headers: { authorization: "Bearer wrong", "content-type": "text/plain" },
+      body: "not json",
+    });
+    expect((await source.handle(req)).status).toBe(401);
   });
 
   it("where filter: non-matching event → 202 ignored, not fired", async () => {

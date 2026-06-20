@@ -97,10 +97,22 @@ $ grep -c crypto.subtle /tmp/reflex-bundle/worker.js → present
 
 ## Verification Summary
 
-All acceptance criteria met. GitHub webhooks can drive reflex directly with the
-laptop out of the loop: HMAC-verified, `where`-filtered, idempotent on redelivery,
-Node-free bundle, Bearer path preserved — proven by unit tests and a live signed
-delivery against the deployed worker producing a D1 Decision.
+The reflex side is proven: HMAC-verified, `where`-filtered, idempotent on
+redelivery, Node-free bundle, Bearer path preserved — by unit tests and a live
+**self-signed** GitHub-shaped delivery against the deployed worker producing a
+D1 Decision (tampered body → 401).
+
+NOT YET exercised: the end-to-end acceptance criterion "a real GitHub repo
+webhook fires reflex with the operator's laptop offline." That requires
+configuring a webhook on a real repo (`wrangler secret put` + GitHub settings) —
+the operator step in `docs.md`. The signing/verify/fire path it exercises is
+identical to the self-signed e2e above; only the GitHub-origin + offline-laptop
+legs are unverified.
+
+> Doctorow Gate block below: auto-appended by `specflow complete` with AI
+> evaluation **unavailable** — each "Confirmed" means the gate did NOT run
+> (passed by default), not an independent confirmation. The real evidence is
+> the sections above.
 
 ## Sign-off
 
