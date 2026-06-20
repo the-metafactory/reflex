@@ -25,18 +25,19 @@ describe("scenario 1: examples are valid by construction (real loader, no fixtur
   it("loads exactly the three blueprints with expected shapes", async () => {
     const blueprints = await loadExamples();
     const byId = new Map(blueprints.map((b) => [b.id, b]));
-    expect([...byId.keys()].sort()).toEqual(["f-testing", "pilot-scan", "pr-stats-daily"]);
+    expect([...byId.keys()].sort()).toEqual(["f-testing", "github-pr-opened", "pilot-scan", "pr-stats-daily"]);
     expect(byId.get("pr-stats-daily")!.kind).toBe("schedule");
     expect(byId.get("pr-stats-daily")!.guards).toEqual({ cooldownMs: 21_600_000, runLock: "skip" });
     expect(byId.get("pilot-scan")!.policy).toBe("approval");
     expect(byId.get("pilot-scan")!.guards.runLock).toBe("buffer");
     expect(byId.get("f-testing")!.kind).toBe("manual");
+    expect(byId.get("github-pr-opened")!.kind).toBe("http"); // F-003 github_hmac example
   });
 
   it("reflex validate core passes on examples/", async () => {
     const result = await validatePaths([EXAMPLES]);
     expect(result.ok).toBe(true);
-    expect(result.blueprints).toHaveLength(3);
+    expect(result.blueprints).toHaveLength(4);
   });
 });
 

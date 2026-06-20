@@ -19,9 +19,26 @@ export interface BusWhen {
     where?: Record<string, string | number | boolean>;
   };
 }
+export type HttpAuthMode = "bearer" | "github_hmac";
+
+export interface HttpAuth {
+  /** `bearer` = Authorization: Bearer <secret>. `github_hmac` = verify the
+   *  X-Hub-Signature-256 HMAC-SHA256 of the raw body with <secret>. */
+  mode: HttpAuthMode;
+  /** Worker secret BINDING name holding the secret (never the value). */
+  secret_env: string;
+}
+
 export interface HttpWhen {
   http: {
+    /** Bearer shorthand — equivalent to auth: { mode: "bearer", secret_env: <token_env> }.
+     *  Mutually exclusive with `auth`. Retained for back-compat; `auth` is the general form. */
     token_env?: string;
+    /** Generic auth block. Mutually exclusive with token_env. */
+    auth?: HttpAuth;
+    /** Flat field-equals filter over top-level payload fields (same matcher as bus.where).
+     *  In github_hmac mode, `github_event` and `repository` are injected before matching. */
+    where?: Record<string, string | number | boolean>;
   };
 }
 export type WhenBlock = ScheduleWhen | ManualWhen | BusWhen | HttpWhen;

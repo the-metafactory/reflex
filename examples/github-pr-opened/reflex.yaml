@@ -1,0 +1,31 @@
+# GitHub-watch Activation Blueprint (F-003): fire when a PR is opened on a
+# watched repo — driven directly by GitHub's signed HTTP delivery, no laptop
+# in the loop. (GitHub's delivery is an HTTP Impulse to reflex.)
+#
+# Setup:
+#   1. Deploy reflex-edge.
+#   2. `wrangler secret put GITHUB_WEBHOOK_SECRET` (the shared HMAC secret).
+#   3. GitHub repo -> Settings -> Webhooks -> Add:
+#        Payload URL:  https://<reflex-edge-host>/impulse/github-pr-opened
+#        Content type: application/json
+#        Secret:       <same value as the secret above>
+#        Events:       Pull requests (and/or Issues)
+#
+# The source verifies X-Hub-Signature-256 (HMAC-SHA256 of the raw body) and
+# injects top-level github_event / repository (full_name) / github_delivery so
+# the flat `where` matcher can target precise events.
+schema: metafactory/activation/v1
+activations:
+  - id: github-pr-opened
+    target: "@jc/f-pr-opened"        # Execution Blueprint Pulse runs (opaque to Reflex)
+    when:
+      http:
+        auth:
+          mode: github_hmac
+          secret_env: GITHUB_WEBHOOK_SECRET   # Worker secret BINDING name
+        where:
+          github_event: pull_request          # from the X-GitHub-Event header
+          action: opened                      # flat top-level payload field
+    policy: auto
+    guards:
+      cooldown: 10s                  # collapse a burst of redeliveries

@@ -1,7 +1,7 @@
 import { Cron } from "croner";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import type { ActivationBlueprint, ImpulseKind, WhenBlock } from "./types";
+import type { ActivationBlueprint, HttpWhen, ImpulseKind, WhenBlock } from "./types";
 
 export const ACTIVATION_SCHEMA_ID = "metafactory/activation/v1";
 
@@ -45,6 +45,39 @@ const flatWhere = z
   }))
   .optional();
 
+const httpAuthSchema = z
+  .object({
+    mode: z.enum(["bearer", "github_hmac"], {
+      errorMap: () => ({ message: 'http auth.mode must be "bearer" or "github_hmac"' }),
+    }),
+    secret_env: z.string().min(1),
+  })
+  .strict();
+
+const httpWhenSchema = z
+  .object({
+    token_env: z.string().min(1).optional(),
+    auth: httpAuthSchema.optional(),
+    where: flatWhere,
+  })
+  .strict()
+  .superRefine((http, ctx) => {
+    const hasToken = http.token_env !== undefined;
+    const hasAuth = http.auth !== undefined;
+    if (hasToken && hasAuth) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "http: token_env and auth are mutually exclusive — use one (token_env is the Bearer shorthand)",
+      });
+    }
+    if (!hasToken && !hasAuth) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "http: requires token_env (Bearer shorthand) or an auth block",
+      });
+    }
+  });
+
 const whenSchema = z
   .object({
     schedule: cronSchema.optional(),
@@ -57,12 +90,7 @@ const whenSchema = z
       })
       .strict()
       .optional(),
-    http: z
-      .object({
-        token_env: z.string().min(1).optional(),
-      })
-      .strict()
-      .optional(),
+    http: httpWhenSchema.optional(),
   })
   .strict()
   .superRefine((when, ctx) => {
@@ -135,7 +163,7 @@ function normalizeWhen(when: Record<string, unknown>, kind: ImpulseKind): WhenBl
     case "bus":
       return { bus: when.bus as BusWhenInner };
     case "http":
-      return { http: (when.http ?? {}) as Record<string, never> };
+      return { http: (when.http ?? {}) as HttpWhen["http"] };
   }
 }
 type BusWhenInner = { subject: string; where?: Record<string, string | number | boolean> };
