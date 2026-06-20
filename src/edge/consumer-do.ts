@@ -2,7 +2,7 @@ import type { D1Database, DurableObjectState, KVNamespace } from "@cloudflare/wo
 import { WebSocketTransport } from "@the-metafactory/myelin/edge";
 import { BlueprintStore } from "../activation/store";
 import { createReflexBus, type ReflexBus } from "../bus";
-import { REFLEX_STREAM_NAME } from "../bus/stream";
+import { REFLEX_STREAM_NAME, ensureReflexStream } from "../bus/stream";
 import type { ReflexConfig } from "../config/schema";
 import { Pipeline } from "../pipeline/evaluate";
 import { BusSource } from "../sources/bus";
@@ -125,6 +125,13 @@ export class ReflexConsumer {
       streamName: REFLEX_STREAM_NAME,
     });
     const bus = createReflexBus(cfg, { transport });
+
+    // Provision the REFLEX JetStream stream (subjects local.{p}.{s}.reflex.>)
+    // so publishFired Activation Events persist AND durable consumers (e.g. the
+    // cortex reflex-activation bridge) can bind. Idempotent create-if-absent;
+    // the local daemon does the same on boot (daemon.ts). Without this, edge
+    // fired events are core-only and lost (#25).
+    await ensureReflexStream(bus.raw, cfg);
 
     const pipeline = new Pipeline({ store, repo, bus });
     const busSource = new BusSource(cfg, store, bus, pipeline, repo);
