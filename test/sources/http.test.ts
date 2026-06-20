@@ -113,9 +113,13 @@ describe("response-code matrix", () => {
     expect((await call("/impulse/authbearer")).status).toBe(202);
   });
 
-  it("github_hmac is edge-only on the local source → 501", async () => {
+  it("github_hmac is edge-only on the local source → 501 (only after valid auth)", async () => {
     // Valid Bearer token presented, but the blueprint requests github_hmac.
     expect((await call("/impulse/ghhmac")).status).toBe(501);
+  });
+
+  it("edge-only 501 stays behind auth: unauthenticated github_hmac route → 401, not 501", async () => {
+    expect((await call("/impulse/ghhmac", {}, null)).status).toBe(401);
   });
 
   it("where filtering is edge-only on the local source → 501", async () => {

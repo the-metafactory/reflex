@@ -27,7 +27,7 @@ Add a **GitHub-HMAC auth mode** + a **`where` matcher** to the edge HTTP impulse
 
 1. **Generic auth block.** `when.http.auth = { mode: "bearer" | "github_hmac", secret_env }`. `mode: "github_hmac"` verifies `X-Hub-Signature-256` = `sha256=<hex>` against `HMAC_SHA256(secret, rawBody)` (constant-time, over the exact received bytes before JSON parse) using the Worker secret binding named by `secret_env`. **Back-compat:** the existing `token_env` stays valid as a Bearer shorthand (`token_env: X` ≡ `auth: { mode: bearer, secret_env: X }`).
 2. **Header/payload filtering.** Add an optional `where` (flat field-equals, the same matcher `src/sources/bus.ts` uses) to `when.http`. In `github_hmac` mode the source injects two top-level fields into the impulse payload before matching — `github_event` (from `X-GitHub-Event`) and `repository` (the payload's `repository.full_name`) — so `where: { github_event: pull_request, action: opened, repository: "owner/repo" }` works despite GitHub's nested payload.
-3. **Idempotency.** Use `X-GitHub-Delivery` (delivery UUID) as the idempotency key for HMAC-mode impulses (feeds the existing guard) so GitHub's at-least-once redelivery fires once.
+3. **Idempotency.** Inject `X-GitHub-Delivery` (delivery UUID) into the payload as `github_delivery`. There is no explicit key override — the existing idempotency guard hashes the blueprint id + canonical payload, and `github_delivery` is part of that payload, so a GitHub redelivery (same delivery GUID + body) hashes identically and fires once; distinct deliveries hash differently and both fire.
 4. **Payload.** Forward the full GitHub JSON payload plus the injected top-level `github_event` + `repository` fields.
 
 ## Requirements
@@ -42,7 +42,7 @@ Add a **GitHub-HMAC auth mode** + a **`where` matcher** to the edge HTTP impulse
 | FR-4 | In github_hmac mode the source injects top-level `github_event` (from `X-GitHub-Event`) and `repository` (`payload.repository.full_name`) into the impulse payload before matching and forwards them downstream. | Filtering + payload |
 | FR-5 | Optional `when.http.where` (flat field-equals over top-level payload fields, reusing the bus matcher) filters which deliveries fire; absent `where` = fire on every authenticated delivery. A non-match returns a `202 {outcome: "ignored", reason: "no-match"}` response and does NOT reach the pipeline (no Decision row recorded) — unlike the bus source, which coalesces ignored counters; the http source does not persist per-delivery ignores in v1. | Filtering decision |
 | FR-6 | The impulse payload is the full GitHub JSON plus injected `github_event` + `repository`; `kind: "http"`, attributed to the blueprint. | Payload decision |
-| FR-7 | `X-GitHub-Delivery` is used as the idempotency key in github_hmac mode so redelivered webhooks fire once. | Dedup decision |
+| FR-7 | `X-GitHub-Delivery` is injected into the payload as `github_delivery`; the existing payload-hash idempotency key (blueprint id + canonical payload) therefore dedups a GitHub redelivery (same GUID + body → same hash → fires once). No explicit delivery-id key override. | Dedup decision |
 | FR-8 | The existing Bearer path (auth, rate limit, body bounds, 202 verdict) is behaviorally unchanged. | Back-compat |
 
 ### Non-Functional Requirements

@@ -134,9 +134,13 @@ when:
   `github_hmac` mode the source injects three top-level payload fields before
   matching/forwarding: `github_event` (from `X-GitHub-Event`), `repository`
   (the payload's `repository.full_name`), and `github_delivery` (from
-  `X-GitHub-Delivery`). A non-match is an Ignored Decision (202), not a fire.
-- **Idempotency:** `github_delivery` rides in the payload, so the pipeline's
-  idempotency key dedups GitHub's at-least-once redelivery (fires once).
+  `X-GitHub-Delivery`). A non-match returns a 202 `{ignored, no-match}`
+  response (no fire, no Decision recorded).
+- **Idempotency:** there is no explicit delivery-id key override. The pipeline's
+  idempotency key is the hash of the blueprint id + the canonical payload, and
+  `github_delivery` is part of that payload — so a GitHub *redelivery* (which
+  reuses the same delivery GUID and body) hashes identically and dedups to a
+  single fire. Two genuinely distinct deliveries hash differently and both fire.
 
 Setup:
 
