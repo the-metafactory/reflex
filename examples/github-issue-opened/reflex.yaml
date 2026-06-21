@@ -3,11 +3,12 @@
 # loop. (GitHub's delivery is an HTTP Impulse to reflex.) Pairs with the cortex
 # F-6 reflex-activation bridge + the `notify.discord` code capability: the
 # `fired` event → cortex bridge → `tasks.@…notify.discord` → per-repo Discord
-# webhook post. End to end: new GitHub issue → Discord, laptop offline.
+# post. End to end: new GitHub issue → Discord, laptop offline.
 #
 # Target: `@jc/notify-discord` — cortex.yaml maps this to capability
-# `notify.discord` with `handler: discord-webhook` (see cortex
-# `reflex_activation.targets` + `notify.discord` repo→webhook map).
+# `notify.discord`, fulfilled by an in-process code handler that posts to a
+# per-repo Discord URL (see cortex `reflex_activation.targets` + the
+# `notify.discord` repo→URL map).
 #
 # Deploy (reflex-edge):
 #   1. Deploy reflex-edge.
