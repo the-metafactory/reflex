@@ -46,14 +46,17 @@
 #
 # Deploy (reflex-edge):
 #   1. Deploy reflex-edge.
-#   2. `wrangler secret put GITHUB_WEBHOOK_SECRET`  (shared HMAC secret)
+#   2. `wrangler secret put GITHUB_PR_WEBHOOK_SECRET`  (this blueprint's OWN HMAC
+#      secret — a SEPARATE org delivery from the issues one, so it carries its own
+#      secret; one delivery = one payload URL = one secret. Isolated: rotating it
+#      never touches the issues delivery's GITHUB_WEBHOOK_SECRET.)
 #   3. Load this blueprint into KV (one document per key under `activation/`):
 #        wrangler kv key put --binding=REFLEX_BLUEPRINTS \
 #          activation/github-pr-review "$(cat examples/github-pr-review/reflex.yaml)"
-#   4. GitHub org → Settings → Webhooks → Add (or extend the existing one):
+#   4. GitHub org → Settings → Webhooks → Add (a NEW delivery, not the issues one):
 #        Payload URL:  https://<reflex-edge-host>/impulse/github-pr-review
 #        Content type: application/json
-#        Secret:       <same value as GITHUB_WEBHOOK_SECRET>
+#        Secret:       <same value as GITHUB_PR_WEBHOOK_SECRET>
 #        Events:       Pull requests
 #
 # The source verifies X-Hub-Signature-256 (HMAC-SHA256 of the raw body) and
@@ -67,7 +70,7 @@ activations:
       http:
         auth:
           mode: github_hmac
-          secret_env: GITHUB_WEBHOOK_SECRET   # Worker secret BINDING name
+          secret_env: GITHUB_PR_WEBHOOK_SECRET   # Worker secret BINDING name (PR-only)
         where:
           github_event: pull_request          # from the X-GitHub-Event header
           action: opened                      # flat top-level payload field
