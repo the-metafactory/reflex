@@ -11,8 +11,12 @@ GitHub delivery and no HMAC secret** — that makes this simpler than the
 | Surface | What lands | Where |
 |---------|-----------|-------|
 | **reflex** | the schedule blueprint (this PR) | `examples/build-journal-weekly/reflex.yaml` → reflex-edge KV |
-| **cortex** | a new `build-journal.run` capability handler **+** the target row | `cortex-prod` on clawbox (a cortex PR + config) |
-| **clawbox env** | pulse repo + claude/discord/wrangler creds | the host the cortex handler shells out from |
+| **cortex** | the generic `process` handler (cortex#1188, ships once) **+** a process **spec file** **+** a target row | `cortex-prod` on clawbox |
+| **clawbox env** | pulse repo + claude/discord/wrangler creds | the host the process runs on |
+
+> The `process` handler is generic and config-driven: once cortex#1188 is on
+> prod, **future** scheduled jobs are just a new spec file + target row — no
+> cortex release. This first one rides along with the cortex#1188 deploy.
 
 ## Real values (inherited from the F-6 deployments)
 
@@ -25,16 +29,21 @@ GitHub delivery and no HMAC secret** — that makes this simpler than the
 | cortex prod | clawbox `~/code/mf/cortex-prod` (systemd drop-in) |
 | pulse repo (clawbox) | confirm path; handler runs `run-journal.ts` from here |
 
-## Why a deterministic code handler, not an LLM session
+## Why the generic `process` code handler, not an LLM session
 
 This run **git-pushes and `wrangler deploy`s a public website unattended**. The
 F-6 `notify.discord` target is an in-process **code handler** (deterministic, no
-Claude session); `sage-pr-review` is an LLM session. A weekly public deploy
-should follow `notify.discord`, not the LLM path — the trigger is a fixed cron,
-the command is fixed, and there is no human in the loop to catch an LLM that
-mis-runs a deploy. So `build-journal.run` is a **new code handler** that shells
-the exact pulse command and reports the outcome. The blueprint `payload`
-(`days`/`post`/`deploy`) is the only input.
+Claude session); `sage-pr-review` is an LLM session. A public deploy should
+follow the code path, not the LLM path — the schedule is a fixed cron, the
+command is fixed, and there is no human in the loop to catch an LLM that
+mis-runs a deploy.
+
+Rather than a bespoke handler per job, cortex ships ONE generic `process`
+handler (cortex#1188): the command is a **spec file** (DATA) on the host, the
+target names which spec to run, and the activation payload only fills declared
+typed `{param}` slots (here `{days}`). argv comes from the spec, runs with no
+shell, and the payload can never pick the command or inject flags. Adding the
+next scheduled job is a new spec file + target row — no cortex release.
 
 ## Gate 0 — merge both PRs first
 
@@ -55,43 +64,54 @@ bun install && bun run build                             # prod build
 $EDITOR <live cortex.yaml>     # the config systemd cortex-prod loads
 ```
 
-Two config edits (cortex#1188), both in the live `cortex.yaml`:
+Three things on prod (cortex#1188 ships the generic handler; the spec + target
+row are this job's DATA):
 
-**1. The target row** — append under `reflex_activation.targets:` (alongside the
-existing `notify-discord` row). This is a **code-handler** target: it sets
-`handler:`, NOT `prompt:` (mutually exclusive — a `prompt` would route to a
-non-existent agent capability instead of the handler):
+**1. The process spec file** — copy the cortex example onto the host, into the
+processes dir (`$CORTEX_PROCESSES_DIR`, else `<config-dir>/processes`, else
+`~/.config/cortex/processes/`):
+
+```bash
+mkdir -p ~/.config/cortex/processes
+cp ~/code/mf/cortex-prod/examples/processes/build-journal.yaml ~/.config/cortex/processes/
+$EDITOR ~/.config/cortex/processes/build-journal.yaml   # set `cwd:` to the pulse repo on THIS host
+```
+
+```yaml
+name: build-journal
+cwd: /abs/path/to/pulse            # the pulse repo ON THIS HOST
+argv: [bun, examples/build-journal/run-journal.ts, --llm, --days, "{days}", --post, --deploy]
+timeout_ms: 900000
+params:
+  days: { type: int, default: 7 }
+```
+
+**2. The target row** — append under `reflex_activation.targets:` in the live
+`cortex.yaml` (alongside `notify-discord`). `handler: process` + `process:`
+names the spec; NOT `prompt:` (that would route to an agent session):
 
 ```yaml
     - target: "@jc/build-journal"
-      capability: "build-journal.run"
+      capability: "process.run"          # free-form label
       assistant: cortex                  # required by schema; IGNORED for code-handler targets
-      handler: "build-journal"           # → createBuildJournalRunner (cortex#1188)
+      handler: "process"
+      process: "build-journal"           # → the spec file above
 ```
 
-**2. The handler config** — a new top-level block (sibling of `notify:`):
+The handler reads the spec fresh per fire, fills `{days}` from the payload
+(`7`) or the spec default, and runs `bun …run-journal.ts --llm --days 7 --post
+--deploy` in `cwd`. The demo gate auto-passes (no `--interactive`) — the
+"fully auto-publish" intent. A 15-minute watchdog kills a hung run (< the
+20-minute JetStream `ack_wait`); a non-zero exit / timeout emits
+`system.bus.process{failed}` and leaves the Decision re-fireable.
 
-```yaml
-build_journal:
-  pulse_repo: /abs/path/to/pulse   # the pulse repo on THIS host; run-journal.ts is shelled from here
-  days_default: 7                  # used when the activation payload omits `days`
-```
-
-The handler runs `bun examples/build-journal/run-journal.ts --llm --days <N>
---post --deploy` inside `pulse_repo` (`--post`/`--deploy` on by default —
-disabled only by an explicit `post:false`/`deploy:false` in the blueprint
-payload). `--days <N>` comes from the payload (`7`) or `days_default`. The
-demo gate auto-passes (no `--interactive`) — that is the "fully auto-publish"
-intent. A 15-minute watchdog kills a hung run (< the 20-minute JetStream
-`ack_wait`); a non-zero exit / timeout emits `system.bus.build_journal{failed}`
-and re-fires.
-
-This host must have on PATH / authenticated: **bun**, the **claude** CLI (the
-`--llm` agents), the **discord** CLI + creds (the `--post` teaser), **wrangler**
-auth for the `myelin-cortex-site` Cloudflare Pages project (the `--deploy`), and
-a checkout of `myelin-cortex-site` for the build-log write + commit. These are
-the HOST's environment — never cortex config. Without them the run fails at
-`--post`/`--deploy` (→ `failed`, re-fireable).
+**3. Host environment** — this host must have on PATH / authenticated: **bun**,
+the **claude** CLI (the `--llm` agents), the **discord** CLI + creds (the
+`--post` teaser), **wrangler** auth for the `myelin-cortex-site` Cloudflare Pages
+project (the `--deploy`), and a checkout of `myelin-cortex-site` for the
+build-log write + commit. These are the HOST's environment — never cortex
+config. Without them the run fails at `--post`/`--deploy` (→ `failed`,
+re-fireable).
 
 ```bash
 sudo systemctl restart cortex-prod
@@ -127,16 +147,19 @@ bunx wrangler kv key get --remote \
   impulse for `build-journal-weekly` (or temporarily set the cron a few minutes
   out, load to KV, then restore). Expect:
   - reflex-edge log: blueprint `build-journal-weekly` fired → `@jc/build-journal`
-  - cortex log: `reflex_activation_dispatched` (capability `build-journal.run`)
+  - cortex log: `reflex_activation_dispatched` + `system.bus.process{started}` (process `build-journal`)
   - the handler runs the pulse pipeline; a new `build-log/<date>-build-journal.html`
-    is committed + deployed; a teaser appears in the public Discord channel.
+    is committed + deployed; a teaser appears in the public Discord channel;
+    `system.bus.process{completed}` on the bus.
 - [ ] Confirm `stack.meta-factory.ai/build-log/` shows the new entry.
 
 ## Rollback
 
 - Reflex: `bunx wrangler kv key delete --remote --namespace-id 0f52ed4f786845a7a66cb37e3297855e "activation/build-journal-weekly"` → gone next refresh.
-- Cortex: remove the target row, restart. Absent target = the schedule fires but
-  resolves to nothing (a `_failed`/unresolved-target log, no side effect).
+- Cortex: remove the target row (and/or `rm ~/.config/cortex/processes/build-journal.yaml`),
+  restart. Absent target = the schedule fires but resolves to nothing (a
+  `_failed`/unresolved-target log, no side effect). The generic `process`
+  handler stays — it's inert with no `process` target.
 - To pause without un-deploying: set `policy: approval` in the blueprint so each
   Sunday fire parks for an operator approval instead of auto-firing.
 
@@ -144,8 +167,9 @@ bunx wrangler kv key get --remote \
 
 1. A schedule blueprint needs **no** GitHub webhook and **no** HMAC secret —
    don't copy the `secret_env` / org-delivery steps from the `github-*` runbooks.
-2. cortex needs the **code** deploy (the `build-journal.run` handler), not just
-   the config row — same lesson as cortex#1184 for `skip_authors`.
+2. THIS first job needs the cortex **code** deploy (the generic `process`
+   handler, cortex#1188) on prod — not just config. AFTER that lands, every
+   *next* scheduled job is a spec file + target row only, no cortex release.
 3. The handler's host must carry the **publish credentials** (claude, discord,
    wrangler, the site checkout). Without them the run fails at `--post`/`--deploy`.
 4. `--days 7` assumes a weekly cadence. A missed Sunday (daemon down — reflex

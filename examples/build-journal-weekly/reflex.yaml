@@ -12,23 +12,29 @@
 # Target: `@jc/build-journal` — resolved by the cortex `reflex_activation`
 # bridge to a cortex `capability` + `assistant`. Reflex never runs the flow
 # itself; the `target` is an opaque Execution Blueprint ref that cortex maps.
-# Required cortex config (cortex#1188) — a DETERMINISTIC in-process code handler
-# (like `notify.discord`), NOT an LLM session, because the run git-pushes +
-# deploys a public site unattended. A code-handler target sets `handler:`, never
-# `prompt:` (mutually exclusive):
+# Resolved by cortex's GENERIC `process` code handler (cortex#1188) — a
+# DETERMINISTIC, config-driven command runner (not an LLM session; the run
+# git-pushes + deploys a public site unattended). The process is DATA: a spec
+# file on the cortex host, so adding more scheduled jobs needs NO cortex release.
 #
+#   # 1. drop the spec file (cortex repo: examples/processes/build-journal.yaml):
+#   #      ~/.config/cortex/processes/build-journal.yaml
+#   #        name: build-journal
+#   #        cwd: /abs/path/to/pulse
+#   #        argv: [bun, examples/build-journal/run-journal.ts, --llm,
+#   #               --days, "{days}", --post, --deploy]
+#   #        params: { days: { type: int, default: 7 } }
+#   # 2. bind it in cortex.yaml:
 #   reflex_activation.targets:
 #     - target: "@jc/build-journal"
-#       capability: "build-journal.run"
+#       capability: "process.run"       # free-form label
 #       assistant: cortex               # required by schema; ignored for code handlers
-#       handler: "build-journal"        # → createBuildJournalRunner
-#   build_journal:                      # top-level block (sibling of notify:)
-#     pulse_repo: /abs/path/to/pulse
-#     days_default: 7
+#       handler: "process"
+#       process: "build-journal"        # → the spec file
 #
-# The `days`/`post`/`deploy` Activation Payload below is the handler's input,
-# so the cortex handler runs the equivalent of:
-#   bun examples/build-journal/run-journal.ts --llm --days 7 --post --deploy
+# The `days` Activation Payload below fills the spec's `{days}` token (the
+# handler runs `…run-journal.ts --llm --days 7 --post --deploy`). `post`/`deploy`
+# are baked into the spec's argv (the schedule always publishes).
 #
 # Deploy (reflex-edge): schedule blueprints need NO GitHub delivery and NO HMAC
 # secret — load straight into KV:
@@ -50,6 +56,4 @@ activations:
       cooldown: 12h                  # collapse any same-evening double-fire; well under the weekly cadence
       run_lock: skip                 # a tick during an in-flight run is Blocked (no concurrent journal runs)
     payload:
-      days: 7                        # journal period: the week since the last Sunday run
-      post: true                     # post the teaser to public Discord
-      deploy: true                   # commit + push site repo, wrangler deploy to stack.meta-factory.ai
+      days: 7                        # fills the spec's `{days}` token (the week since the last Sunday run)
