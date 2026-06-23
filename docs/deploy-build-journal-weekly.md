@@ -34,16 +34,21 @@ GitHub delivery and no HMAC secret** — that makes this simpler than the
 This run **git-pushes and `wrangler deploy`s a public website unattended**. The
 F-6 `notify.discord` target is an in-process **code handler** (deterministic, no
 Claude session); `sage-pr-review` is an LLM session. A public deploy should
-follow the code path, not the LLM path — the schedule is a fixed cron, the
-command is fixed, and there is no human in the loop to catch an LLM that
-mis-runs a deploy.
+follow the code path, not the LLM path — the schedule is a fixed schedule
+expression, the command is fixed, and there is no human in the loop to catch an
+LLM that mis-runs a deploy.
 
 Rather than a bespoke handler per job, cortex ships ONE generic `process`
 handler (cortex#1188): the command is a **spec file** (DATA) on the host, the
 target names which spec to run, and the activation payload only fills declared
-typed `{param}` slots (here `{days}`). argv comes from the spec, runs with no
-shell, and the payload can never pick the command or inject flags. Adding the
-next scheduled job is a new spec file + target row — no cortex release.
+typed `{param}` slots (here `{days}`). argv comes from the spec and runs with no
+shell. cortex#1188 enforces the boundary — `target.process` (the spec name) is
+read from the trusted target config, never the payload; a `string` param is
+`enum`-constrained unless `freeform` is set; and array-spawn means a param value
+is a single argv element (see `process-runner.ts` `ProcessParamSchema` +
+`resolveArgv`). So a payload fills declared slots only — it does not choose the
+command. Adding the next scheduled job is a new spec file + target row — no
+cortex release.
 
 ## Gate 0 — merge both PRs first
 
@@ -150,7 +155,7 @@ bunx wrangler kv key get --remote \
 ## Part C — verify end-to-end
 
 - [ ] **Manual fire** before waiting a week. From clawbox, publish a `schedule`
-  impulse for `build-journal-weekly` (or temporarily set the cron a few minutes
+  impulse for `build-journal-weekly` (or temporarily set the schedule a few minutes
   out, load to KV, then restore). Expect:
   - reflex-edge log: blueprint `build-journal-weekly` fired → `@jc/build-journal`
   - cortex log: `reflex_activation_dispatched` + `system.bus.process{started}` (process `build-journal`)
