@@ -38,8 +38,8 @@ the exact pulse command and reports the outcome. The blueprint `payload`
 
 ## Gate 0 — merge both PRs first
 
-- [ ] Merge **reflex#<this>** (blueprint + greens the examples vocab/id gate)
-- [ ] Merge **cortex#<new>** (the `build-journal.run` code handler)
+- [ ] Merge **reflex#30** (blueprint + greens the examples vocab/id gate)
+- [ ] Merge **cortex#1188** (the `build-journal.run` code handler)
 
 ## Part A — cortex (on clawbox, NOT a laptop)
 
@@ -49,7 +49,7 @@ must land on prod.
 ```bash
 ssh clawbox
 cd ~/code/mf/cortex-prod
-git fetch origin && git checkout main && git pull        # picks up cortex#<new>
+git fetch origin && git checkout main && git pull        # picks up cortex#1188
 bun install && bun run build                             # prod build
 
 $EDITOR <live cortex.yaml>     # the config systemd cortex-prod loads
@@ -60,7 +60,7 @@ Append under `reflex_activation.targets:` (alongside the existing
 
 ```yaml
     - target: "@jc/build-journal"
-      capability: build-journal.run      # the new in-process code handler (cortex#<new>)
+      capability: build-journal.run      # the new in-process code handler (cortex#1188)
       assistant: sage                    # routing identity stamped on the dispatch
       prompt: |
         Weekly build journal: run the pulse P_BUILD_JOURNAL pipeline for the
