@@ -12,18 +12,21 @@
 # Target: `@jc/build-journal` — resolved by the cortex `reflex_activation`
 # bridge to a cortex `capability` + `assistant`. Reflex never runs the flow
 # itself; the `target` is an opaque Execution Blueprint ref that cortex maps.
-# Required cortex `reflex_activation.targets` entry — the recommended path is a
-# DETERMINISTIC in-process code handler (like `notify.discord`), NOT an LLM
-# session, because the run git-pushes + deploys a public site unattended:
+# Required cortex config (cortex#1188) — a DETERMINISTIC in-process code handler
+# (like `notify.discord`), NOT an LLM session, because the run git-pushes +
+# deploys a public site unattended. A code-handler target sets `handler:`, never
+# `prompt:` (mutually exclusive):
 #
-#   - target: "@jc/build-journal"
-#     capability: build-journal.run     # new in-process code handler (see runbook)
-#     assistant: sage                   # routing identity for the dispatch
-#     prompt: |
-#       Weekly build journal. Run the pulse P_BUILD_JOURNAL pipeline for the
-#       last 7 days and publish it (Discord + site deploy).
+#   reflex_activation.targets:
+#     - target: "@jc/build-journal"
+#       capability: "build-journal.run"
+#       assistant: cortex               # required by schema; ignored for code handlers
+#       handler: "build-journal"        # → createBuildJournalRunner
+#   build_journal:                      # top-level block (sibling of notify:)
+#     pulse_repo: /abs/path/to/pulse
+#     days_default: 7
 #
-# The `days`/`post`/`deploy` Activation Payload below is merged into the dispatch
+# The `days`/`post`/`deploy` Activation Payload below is the handler's input,
 # so the cortex handler runs the equivalent of:
 #   bun examples/build-journal/run-journal.ts --llm --days 7 --post --deploy
 #

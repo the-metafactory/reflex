@@ -55,28 +55,43 @@ bun install && bun run build                             # prod build
 $EDITOR <live cortex.yaml>     # the config systemd cortex-prod loads
 ```
 
-Append under `reflex_activation.targets:` (alongside the existing
-`notify-discord` row):
+Two config edits (cortex#1188), both in the live `cortex.yaml`:
+
+**1. The target row** — append under `reflex_activation.targets:` (alongside the
+existing `notify-discord` row). This is a **code-handler** target: it sets
+`handler:`, NOT `prompt:` (mutually exclusive — a `prompt` would route to a
+non-existent agent capability instead of the handler):
 
 ```yaml
     - target: "@jc/build-journal"
-      capability: build-journal.run      # the new in-process code handler (cortex#1188)
-      assistant: sage                    # routing identity stamped on the dispatch
-      prompt: |
-        Weekly build journal: run the pulse P_BUILD_JOURNAL pipeline for the
-        last 7 days and publish it (Discord teaser + site deploy).
+      capability: "build-journal.run"
+      assistant: cortex                  # required by schema; IGNORED for code-handler targets
+      handler: "build-journal"           # → createBuildJournalRunner (cortex#1188)
 ```
 
-The `build-journal.run` handler must, on its host:
+**2. The handler config** — a new top-level block (sibling of `notify:`):
 
-- `cd` to the pulse repo, run `bun examples/build-journal/run-journal.ts --llm
-  --days <payload.days> --post --deploy` (auto-passes the editor gate — that is
-  the intent of "fully auto-publish"),
-- have on PATH / authenticated: **bun**, **claude** CLI (the `--llm` agents),
-  the cortex **discord** CLI + creds (the `--post` teaser), **wrangler** auth
-  for the `myelin-cortex-site` Cloudflare Pages project (the `--deploy`), and a
-  checkout of `myelin-cortex-site` for the build-log write + commit,
-- emit a `system.bus.*` outcome the same way the other handlers do.
+```yaml
+build_journal:
+  pulse_repo: /abs/path/to/pulse   # the pulse repo on THIS host; run-journal.ts is shelled from here
+  days_default: 7                  # used when the activation payload omits `days`
+```
+
+The handler runs `bun examples/build-journal/run-journal.ts --llm --days <N>
+--post --deploy` inside `pulse_repo` (`--post`/`--deploy` on by default —
+disabled only by an explicit `post:false`/`deploy:false` in the blueprint
+payload). `--days <N>` comes from the payload (`7`) or `days_default`. The
+demo gate auto-passes (no `--interactive`) — that is the "fully auto-publish"
+intent. A 15-minute watchdog kills a hung run (< the 20-minute JetStream
+`ack_wait`); a non-zero exit / timeout emits `system.bus.build_journal{failed}`
+and re-fires.
+
+This host must have on PATH / authenticated: **bun**, the **claude** CLI (the
+`--llm` agents), the **discord** CLI + creds (the `--post` teaser), **wrangler**
+auth for the `myelin-cortex-site` Cloudflare Pages project (the `--deploy`), and
+a checkout of `myelin-cortex-site` for the build-log write + commit. These are
+the HOST's environment — never cortex config. Without them the run fails at
+`--post`/`--deploy` (→ `failed`, re-fireable).
 
 ```bash
 sudo systemctl restart cortex-prod
