@@ -104,7 +104,12 @@ The handler reads the spec fresh per fire, fills `{days}` from the payload
 --deploy` in `cwd`. The demo gate auto-passes (no `--interactive`) — the
 "fully auto-publish" intent. A 15-minute watchdog kills a hung run (< the
 20-minute JetStream `ack_wait`); a non-zero exit / timeout emits
-`system.bus.process{failed}` and leaves the Decision re-fireable.
+`system.bus.process{failed}` and leaves the Decision re-fireable. These are
+cortex-side guarantees — source: `cortex` repo
+`src/bus/process-runner.ts` (`superviseRun` + the `timeout_ms` cap) and
+`createSystemBusProcessEvent` in `src/bus/system-events.ts`, shipped in
+cortex#1188. With `detach: true` (this spec) the run is supervised in the
+background so it does not block other reflex activations.
 
 **3. Host environment** — this host must have on PATH / authenticated: **bun**,
 the **claude** CLI (the `--llm` agents), the **discord** CLI + creds (the

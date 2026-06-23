@@ -1,7 +1,7 @@
 # Schedule-kind Activation Blueprint: fire the public build journal every Sunday
 # evening, laptop offline. Reflex owns the clock (internal heartbeat / DO alarm —
-# no Cloudflare Cron consumed); the schedule Impulse is an internal cron tick
-# validated by the same croner that runs it.
+# no Cloudflare Cron consumed); the schedule Impulse is an internal tick of the
+# schedule expression, validated by the same croner that runs it.
 #
 # Pairs with the cortex F-6 reflex-activation bridge. End to end:
 #   Sunday 18:00 Europe/Zurich  →  reflex fires  →  cortex bridge  →
@@ -51,7 +51,7 @@ activations:
   - id: build-journal-weekly
     target: "@jc/build-journal"      # cortex maps → handler: process, process: build-journal
     when:
-      schedule: "0 18 * * 0"         # Sunday 18:00 — cron, validated by the croner that runs it
+      schedule: "0 18 * * 0"         # Sunday 18:00 — schedule expression, validated by the croner that runs it
       timezone: Europe/Zurich        # IANA timezone; DST handled by croner
     policy: auto                     # auto-fire (no Activation Approval needed)
     guards:
