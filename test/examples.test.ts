@@ -26,6 +26,7 @@ describe("scenario 1: examples are valid by construction (real loader, no fixtur
     const blueprints = await loadExamples();
     const byId = new Map(blueprints.map((b) => [b.id, b]));
     expect([...byId.keys()].sort()).toEqual([
+      "build-journal-weekly",
       "f-testing",
       "github-issue-opened",
       "github-pr-opened",
@@ -35,6 +36,9 @@ describe("scenario 1: examples are valid by construction (real loader, no fixtur
     ]);
     expect(byId.get("pr-stats-daily")!.kind).toBe("schedule");
     expect(byId.get("pr-stats-daily")!.guards).toEqual({ cooldownMs: 21_600_000, runLock: "skip" });
+    expect(byId.get("build-journal-weekly")!.kind).toBe("schedule"); // weekly Sunday journal → cortex process handler (spec build-journal)
+    expect(byId.get("build-journal-weekly")!.guards).toEqual({ cooldownMs: 43_200_000, runLock: "skip" });
+    expect(byId.get("build-journal-weekly")!.target).toBe("@jc/build-journal");
     expect(byId.get("pilot-scan")!.policy).toBe("approval");
     expect(byId.get("pilot-scan")!.guards.runLock).toBe("buffer");
     expect(byId.get("f-testing")!.kind).toBe("manual");
@@ -47,7 +51,7 @@ describe("scenario 1: examples are valid by construction (real loader, no fixtur
   it("reflex validate core passes on examples/", async () => {
     const result = await validatePaths([EXAMPLES]);
     expect(result.ok).toBe(true);
-    expect(result.blueprints).toHaveLength(6);
+    expect(result.blueprints).toHaveLength(7);
   });
 });
 

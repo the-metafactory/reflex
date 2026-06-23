@@ -1,0 +1,61 @@
+# Schedule-kind Activation Blueprint: fire the public build journal every Sunday
+# evening, laptop offline. Reflex owns the clock (internal heartbeat / DO alarm —
+# no external schedule source consumed); the schedule Impulse is an internal tick of the
+# schedule expression, validated by the same croner that runs it.
+#
+# Pairs with the cortex F-6 reflex-activation bridge. End to end:
+#   Sunday 18:00 Europe/Zurich  →  reflex fires  →  cortex bridge  →
+#   cortex `process` handler (spec build-journal)  →  the pulse P_BUILD_JOURNAL
+#   pipeline runs (gather facts → draft → federated review ×2 → humanize →
+#   publish), posting to public Discord and deploying the myelin-cortex-site
+#   repo to stack.meta-factory.ai/build-log/ (the site's Cloudflare Pages project).
+#
+# Target: `@jc/build-journal` — resolved by the cortex `reflex_activation`
+# bridge to a cortex code handler. Reflex never runs the flow itself; the
+# `target` is an opaque Execution Blueprint ref that cortex maps.
+# Resolved by cortex's GENERIC `process` code handler (cortex#1188) — a
+# DETERMINISTIC, config-driven command runner (not an LLM session; the run
+# git-pushes + deploys a public site unattended). The process is DATA: a spec
+# file on the cortex host, so adding more scheduled jobs needs NO cortex release.
+#
+#   # 1. drop the spec file (cortex repo: examples/processes/build-journal.yaml):
+#   #      ~/.config/cortex/processes/build-journal.yaml
+#   #        name: build-journal
+#   #        cwd: /abs/path/to/pulse
+#   #        argv: [bun, examples/build-journal/run-journal.ts, --llm,
+#   #               --days, "{days}", --post, --deploy]
+#   #        detach: true   # long run: don't block the serial bridge
+#   #        params: { days: { type: int, default: 7 } }
+#   # 2. bind it in cortex.yaml:
+#   reflex_activation.targets:
+#     - target: "@jc/build-journal"
+#       capability: "process.run"       # free-form label
+#       assistant: cortex               # required by schema; ignored for code handlers
+#       handler: "process"
+#       process: "build-journal"        # → the spec file
+#
+# The `days` Activation Payload below fills the spec's `{days}` token (the
+# handler runs `…run-journal.ts --llm --days 7 --post --deploy`). `post`/`deploy`
+# are baked into the spec's argv (the schedule always publishes).
+#
+# Deploy (reflex-edge): schedule blueprints need NO GitHub delivery and NO HMAC
+# secret — load straight into KV:
+#   1. Deploy reflex-edge (or rely on the next heartbeat KV refresh).
+#   2. Load this blueprint into KV (one document per key under `activation/`):
+#        wrangler kv key put --binding=REFLEX_BLUEPRINTS \
+#          activation/build-journal-weekly "$(cat examples/build-journal-weekly/reflex.yaml)"
+#
+# See docs/deploy-build-journal-weekly.md for the cortex-prod handler + config.
+schema: metafactory/activation/v1
+activations:
+  - id: build-journal-weekly
+    target: "@jc/build-journal"      # cortex maps → handler: process, process: build-journal
+    when:
+      schedule: "0 18 * * 0"         # Sunday 18:00 — schedule expression, validated by the croner that runs it
+      timezone: Europe/Zurich        # IANA timezone; DST handled by croner
+    policy: auto                     # auto-fire (no Activation Approval needed)
+    guards:
+      cooldown: 12h                  # guards against a re-fire of the same instant (e.g. blueprint reload/redeploy mid-window); well under the weekly cadence
+      run_lock: skip                 # a tick during an in-flight run is Blocked (no concurrent journal runs)
+    payload:
+      days: 7                        # fills the spec's `{days}` token (the week since the last Sunday run)
