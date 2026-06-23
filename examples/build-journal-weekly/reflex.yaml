@@ -1,6 +1,6 @@
 # Schedule-kind Activation Blueprint: fire the public build journal every Sunday
 # evening, laptop offline. Reflex owns the clock (internal heartbeat / DO alarm —
-# no Cloudflare Cron consumed); the schedule Impulse is an internal tick of the
+# no external schedule source consumed); the schedule Impulse is an internal tick of the
 # schedule expression, validated by the same croner that runs it.
 #
 # Pairs with the cortex F-6 reflex-activation bridge. End to end:

@@ -42,12 +42,16 @@ Rather than a bespoke handler per job, cortex ships ONE generic `process`
 handler (cortex#1188): the command is a **spec file** (DATA) on the host, the
 target names which spec to run, and the activation payload only fills declared
 typed `{param}` slots (here `{days}`). argv comes from the spec and runs with no
-shell. cortex#1188 enforces the boundary — `target.process` (the spec name) is
-read from the trusted target config, never the payload; a `string` param is
-`enum`-constrained unless `freeform` is set; and array-spawn means a param value
-is a single argv element (see `process-runner.ts` `ProcessParamSchema` +
-`resolveArgv`). So a payload fills declared slots only — it does not choose the
-command. Adding the next scheduled job is a new spec file + target row — no
+shell. cortex#1188 is *designed* to enforce this boundary — `target.process`
+(the spec name) read from the trusted target config not the payload; a `string`
+param `enum`-constrained unless `freeform` is set; array-spawn so a param value
+is a single argv element. **Verify it against the merged cortex code before the
+first unattended deploy** — source + tests: `cortex` repo
+`src/bus/process-runner.ts` (`ProcessParamSchema`, `resolveArgv`) and
+`src/bus/__tests__/process-runner.test.ts` (the "spec name comes from
+target.process, NOT the payload" case). The intent: a payload fills declared
+slots only — it does not choose the command. Adding the next scheduled job is a
+new spec file + target row — no
 cortex release.
 
 ## Gate 0 — merge both PRs first
@@ -109,12 +113,15 @@ The handler reads the spec fresh per fire, fills `{days}` from the payload
 --deploy` in `cwd`. The demo gate auto-passes (no `--interactive`) — the
 "fully auto-publish" intent. A 15-minute watchdog kills a hung run (< the
 20-minute JetStream `ack_wait`); a non-zero exit / timeout emits
-`system.bus.process{failed}` and leaves the Decision re-fireable. These are
-cortex-side guarantees — source: `cortex` repo
-`src/bus/process-runner.ts` (`superviseRun` + the `timeout_ms` cap) and
-`createSystemBusProcessEvent` in `src/bus/system-events.ts`, shipped in
-cortex#1188. With `detach: true` (this spec) the run is supervised in the
-background so it does not block other reflex activations.
+`system.bus.process{failed}`. Because this spec sets **`detach: true`** (so a
+~10-min run does not block other reflex activations), the run is supervised in
+the background: a failure is **reported via `system.bus.process{failed}` only —
+it is NOT auto-re-fired**; the next Sunday schedule re-runs it (idempotent —
+overwrites that date's entry, clean repo = no-op commit). (Only *synchronous*,
+non-detached process specs re-fire on failure.) These are cortex-side behaviours
+intended in cortex#1188 (`src/bus/process-runner.ts` — `superviseRun`, the
+`detach` branch, the `timeout_ms` cap; `system-events.ts`); **verify against the
+merged cortex code before relying on them for an unattended deploy.**
 
 **3. Host environment** — this host must have on PATH / authenticated: **bun**,
 the **claude** CLI (the `--llm` agents), the **discord** CLI + creds (the
