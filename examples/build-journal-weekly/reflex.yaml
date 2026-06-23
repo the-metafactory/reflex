@@ -5,13 +5,14 @@
 #
 # Pairs with the cortex F-6 reflex-activation bridge. End to end:
 #   Sunday 18:00 Europe/Zurich  →  reflex fires  →  cortex bridge  →
-#   tasks.@…build-journal.run  →  the pulse P_BUILD_JOURNAL pipeline runs
-#   (gather facts → draft → federated review ×2 → humanize → publish),
-#   posting to public Discord and deploying stack.meta-factory.ai/build-log/.
+#   cortex `process` handler (spec build-journal)  →  the pulse P_BUILD_JOURNAL
+#   pipeline runs (gather facts → draft → federated review ×2 → humanize →
+#   publish), posting to public Discord and deploying the myelin-cortex-site
+#   repo to stack.meta-factory.ai/build-log/ (the site's Cloudflare Pages project).
 #
 # Target: `@jc/build-journal` — resolved by the cortex `reflex_activation`
-# bridge to a cortex `capability` + `assistant`. Reflex never runs the flow
-# itself; the `target` is an opaque Execution Blueprint ref that cortex maps.
+# bridge to a cortex code handler. Reflex never runs the flow itself; the
+# `target` is an opaque Execution Blueprint ref that cortex maps.
 # Resolved by cortex's GENERIC `process` code handler (cortex#1188) — a
 # DETERMINISTIC, config-driven command runner (not an LLM session; the run
 # git-pushes + deploys a public site unattended). The process is DATA: a spec
@@ -23,6 +24,7 @@
 #   #        cwd: /abs/path/to/pulse
 #   #        argv: [bun, examples/build-journal/run-journal.ts, --llm,
 #   #               --days, "{days}", --post, --deploy]
+#   #        detach: true   # long run: don't block the serial bridge
 #   #        params: { days: { type: int, default: 7 } }
 #   # 2. bind it in cortex.yaml:
 #   reflex_activation.targets:
@@ -47,13 +49,13 @@
 schema: metafactory/activation/v1
 activations:
   - id: build-journal-weekly
-    target: "@jc/build-journal"      # cortex maps → capability build-journal.run, assistant sage
+    target: "@jc/build-journal"      # cortex maps → handler: process, process: build-journal
     when:
       schedule: "0 18 * * 0"         # Sunday 18:00 — cron, validated by the croner that runs it
       timezone: Europe/Zurich        # IANA timezone; DST handled by croner
     policy: auto                     # auto-fire (no Activation Approval needed)
     guards:
-      cooldown: 12h                  # collapse any same-evening double-fire; well under the weekly cadence
+      cooldown: 12h                  # guards against a re-fire of the same instant (e.g. blueprint reload/redeploy mid-window); well under the weekly cadence
       run_lock: skip                 # a tick during an in-flight run is Blocked (no concurrent journal runs)
     payload:
       days: 7                        # fills the spec's `{days}` token (the week since the last Sunday run)

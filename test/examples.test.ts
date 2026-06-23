@@ -36,7 +36,7 @@ describe("scenario 1: examples are valid by construction (real loader, no fixtur
     ]);
     expect(byId.get("pr-stats-daily")!.kind).toBe("schedule");
     expect(byId.get("pr-stats-daily")!.guards).toEqual({ cooldownMs: 21_600_000, runLock: "skip" });
-    expect(byId.get("build-journal-weekly")!.kind).toBe("schedule"); // weekly Sunday journal → cortex build-journal.run
+    expect(byId.get("build-journal-weekly")!.kind).toBe("schedule"); // weekly Sunday journal → cortex process handler (spec build-journal)
     expect(byId.get("build-journal-weekly")!.guards).toEqual({ cooldownMs: 43_200_000, runLock: "skip" });
     expect(byId.get("build-journal-weekly")!.target).toBe("@jc/build-journal");
     expect(byId.get("pilot-scan")!.policy).toBe("approval");

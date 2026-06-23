@@ -48,7 +48,7 @@ next scheduled job is a new spec file + target row — no cortex release.
 ## Gate 0 — merge both PRs first
 
 - [ ] Merge **reflex#30** (blueprint + greens the examples vocab/id gate)
-- [ ] Merge **cortex#1188** (the `build-journal.run` code handler)
+- [ ] Merge **cortex#1188** (the generic `process` code handler)
 
 ## Part A — cortex (on clawbox, NOT a laptop)
 
@@ -82,6 +82,7 @@ name: build-journal
 cwd: /abs/path/to/pulse            # the pulse repo ON THIS HOST
 argv: [bun, examples/build-journal/run-journal.ts, --llm, --days, "{days}", --post, --deploy]
 timeout_ms: 900000
+detach: true                      # long run: don't block the serial bridge; report via system.bus.process
 params:
   days: { type: int, default: 7 }
 ```
@@ -108,10 +109,10 @@ The handler reads the spec fresh per fire, fills `{days}` from the payload
 **3. Host environment** — this host must have on PATH / authenticated: **bun**,
 the **claude** CLI (the `--llm` agents), the **discord** CLI + creds (the
 `--post` teaser), **wrangler** auth for the `myelin-cortex-site` Cloudflare Pages
-project (the `--deploy`), and a checkout of `myelin-cortex-site` for the
-build-log write + commit. These are the HOST's environment — never cortex
-config. Without them the run fails at `--post`/`--deploy` (→ `failed`,
-re-fireable).
+project (which `--deploy` ships to `stack.meta-factory.ai`), and a checkout of
+`myelin-cortex-site` for the build-log write + commit. These are the HOST's
+environment — never cortex config. Without them the run fails at
+`--post`/`--deploy` (→ `failed`, re-fireable).
 
 ```bash
 sudo systemctl restart cortex-prod
