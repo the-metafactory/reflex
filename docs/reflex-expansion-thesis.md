@@ -19,22 +19,35 @@ PR→sage review, weekly build-journal) = real fit. So the answer is neither
 "expand" nor "freeze" — it is **demand-pulled expansion on the v0 matcher, with
 two architectural fixes before anything auto-fires unattended.**
 
-The sharpest single finding cuts the whole roadmap: **issue-triage needs zero
-new matcher work** — it is flat `label == []`, which the v0 flat field-equality
-matcher already does. "Fix the matcher first" (ranked the bottleneck by 3 of 5
-council voices) is speculative generality delaying the one shippable win. Let
-real misfires name the matcher extension that is actually load-bearing.
+The council's near-consensus "fix the matcher first" (ranked the bottleneck by 3
+of 5 voices) deserved scrutiny — RedTeam-1 attacked it as speculative generality,
+claiming triage "needs zero matcher work, it's flat `label == []`." **That
+counter-claim is itself wrong** (verified post-debate against
+`src/sources/bus.ts:207`): the matcher is strict `===` on *top-level* payload
+fields only. GitHub's `labels` live nested under `issue.labels` and are an array
+— unreachable by the flat matcher, and `[] === []` is false by reference anyway.
+
+So the honest position is narrower than either side argued: a *meaningful*
+triage blueprint (one that discriminates untriaged issues from noise) needs
+either a bounded matcher extension (nested-field read + emptiness/negation) **or**
+a downstream cortex gate (the `skip_authors` pattern applied to labels). The only
+truly-zero-work variant — "every opened issue → a #triage channel" — barely
+differs from the live `github-issue-opened` blueprint and adds no discrimination.
+Triage is therefore the **first genuine demand-pull for the matcher**, not a
+free win. The cleanly-shippable-now piece is the **dry-run harness** (matcher-
+independent). Let real misfires keep naming which matcher extension earns its
+keep.
 
 ## The idea space (oscillated) + combined verdict
 
 | Idea | Aperture | Verdict | Why |
 |---|---|---|---|
-| **Issue-triage → #triage Discord** (unlabeled, no LLM) | tactical | **SHIP NOW** | Real recurring toil; flat matcher already does it; reuses live path; ~1 afternoon |
-| **Dry-run test harness** | meta | **SHIP NEXT** | Makes every future blueprint safe to change; prevents 3am self-spam; genuine load-bearing piece |
+| **Dry-run test harness** | meta | **SHIP NOW** | Matcher-independent. Makes every future blueprint safe to change; prevents 3am self-spam; genuine load-bearing piece |
+| **Issue-triage** (untriaged, no LLM) | tactical | **SHIP via cortex gate** | v0 matcher *cannot* read `issue.labels` (nested+array — `bus.ts:207`). Cheapest real form = a `skip_authors`-style label gate in cortex on the live delivery; reflex unchanged. Pure "every issue → #triage channel" is redundant with the live issue→Discord |
 | **Tag → release-notes process** | tactical | **SHIP (clean)** | Single impulse → single fire → deterministic process. Archetypal activation, no nested fields |
 | **Nightly sec/dep audit → Discord** | tactical | **SHIP (read-only)** | Same shape as live issue→Discord; aligns w/ day job; no write authority |
 | **Self-watchdog** (did automations fire?) | strategic/meta | **SHIP — RE-SPEC** | Must be **out-of-band** (external pinger, not a Reflex blueprint) AND assert on **outcome = success**, not the fire-record. As proposed it is security theater that suppresses the alarm it exists to raise |
-| **Richer matcher** (nested-eq + negation) | meta | **DEFER → on-demand** | Not the bottleneck for triage. When a real gate needs it, add *only that*, with a written non-goal + test corpus. Treat as a security-sensitive parser; **never** a trust-gate on attacker-controlled fields |
+| **Richer matcher** (nested-eq + negation) | meta | **DEFER, demand-pulled** | Triage is its first real demand (reading `issue.labels`). When a gate needs it, add *only that one extension*, with a written non-goal + test corpus. Treat as a security-sensitive parser; **never** a trust-gate on attacker-controlled fields |
 | **Decision-ledger as substrate** | strategic | **GATE** | Moat illusion — once Cortex/Pulse read the raw schema it is an unmigratable hidden API. Only ever publish a **frozen, versioned view** |
 | **Cross-repo fan-out** (1→N targets) | strategic | **KILL (→ Pulse)** | Multi-target = orchestration. Boundary violation |
 | **Auto-merge dep-bot PR** | tactical | **KILL (unanimous)** | Untrusted + replayable + bot-spoofable impulse → write to `main` → chains to deploy. Never `policy: auto` |
@@ -93,11 +106,15 @@ misfire-prevention). Most of the S-tier strategic ideas do not — yet.
 
 ## Net recommendation
 
-1. Ship **issue-triage** + **dry-run harness** (zero new risk, real payoff).
-2. Re-spec the **watchdog** out-of-band, asserting on the outcome signal.
-3. Land the **`outcome + causation_depth`** event before adding any *reactive*
+1. Ship the **dry-run harness** (matcher-independent, zero new risk, real payoff).
+2. Ship **issue-triage** as a cortex-side label gate on the live delivery
+   (`skip_authors` pattern) — or treat it as the first demand-pull for the
+   bounded matcher extension. Not the free win the debate first assumed.
+3. Re-spec the **watchdog** out-of-band, asserting on the outcome signal.
+4. Land the **`outcome + causation_depth`** event before adding any *reactive*
    blueprint.
-4. **Defer** the matcher until a misfire names the exact extension needed.
+5. **Defer** the matcher until a real gate (triage first) names the exact
+   extension needed.
 5. Everything orchestration-shaped stays in **Pulse**.
 
 ---

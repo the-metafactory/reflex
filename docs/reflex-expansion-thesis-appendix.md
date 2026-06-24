@@ -502,9 +502,18 @@ whole system.
 
 The synthesis in the main doc is the intersection of these eight:
 
-- **Triage SHIP-NOW** ← YAGNI's 80/20 + RedTeam-1's "needs zero matcher work."
-- **Matcher DEFER** ← RedTeam-1 inverting the Strategist's "M3 first" consensus
-  (the one place the council was *wrong*, caught by adversarial review).
+- **Triage = first matcher demand-pull, NOT a free win** ← YAGNI's 80/20 and
+  RedTeam-1 both claimed triage "needs zero matcher work, flat `label == []`."
+  **Both were wrong**, verified post-debate against `src/sources/bus.ts:207`:
+  the matcher is strict `===` on *top-level* fields only; `issue.labels` is
+  nested + an array, unreachable. Lesson: an adversary's confident mechanical
+  claim still needs a code probe — neither the council nor the first red team
+  checked it. The main-doc conclusion reflects the corrected mechanics (cortex
+  label gate, or the bounded matcher extension), not this transcript's claim.
+- **Matcher DEFER (demand-pulled)** ← RedTeam-1 rightly challenged the
+  Strategist's "M3 first" consensus as speculative generality. The *direction*
+  (defer, demand-pull) survives even though RedTeam-1's supporting example was
+  wrong — triage is the demand that pulls the first extension.
 - **Watchdog RE-SPEC (out-of-band, outcome-signal)** ← Operator's pick, repaired
   by RedTeam-1 (theater) + RedTeam-3 (false-negative).
 - **`outcome + causation_depth` event** ← RedTeam-3's compound-failure fix,
