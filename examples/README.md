@@ -40,6 +40,7 @@ Three `http`-kind blueprints fired directly by GitHub's signed delivery (`github
 - **github-issue-opened** → `@jc/notify-discord`: new issue → cortex F-6 bridge → per-repo Discord post (code-handler path).
 - **github-pr-opened** → `@jc/f-pr-opened`: generic "PR opened" Execution Blueprint (F-003 reference).
 - **github-pr-review** → `@jc/sage-pr-review`: PR opened → cortex bridge → sage runs its `code-review.*` capability on the PR (CC-prompt path). The author trust gate (skip trusted authors, review everyone else) lives in cortex, not here — reflex's v0 `where` is flat field-equality and cannot read the nested author or negate. The trusted-author list is a **configurable** cortex setting and the gate is **deterministic** (the bridge drops a trusted author's dispatch before any session starts; it never trusts the LLM to honour a "skip" instruction). Each `reflex.yaml` header is the full tutorial, including the required cortex `reflex_activation.targets` entry.
+- **tag-release-notes** → `@jc/release-notes`: a tag pushed → cortex bridge → a deterministic cortex `process` handler generates a release-notes **draft** (same config-driven runner as build-journal, not an LLM session). Matches GitHub's `create` event on `ref_type: tag` (both top-level, flat-matchable — a `push` ref would need a prefix match the matcher cannot do). New, isolated GitHub delivery with its own HMAC secret. The header documents the cortex `process` spec + binding; the generator itself is the cortex-side build.
 
 ## The acceptance walk
 

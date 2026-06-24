@@ -1,0 +1,85 @@
+# GitHub-watch Activation Blueprint: fire when a TAG is pushed to a watched repo,
+# so a release-notes draft is generated automatically — no laptop in the loop.
+# (GitHub's signed delivery is an HTTP Impulse to reflex.) Pairs with the cortex
+# F-6 reflex-activation bridge → a DETERMINISTIC cortex `process` handler (the
+# same config-driven command runner that powers build-journal — NOT an LLM
+# session). End to end:
+#
+#   tag pushed on a Metafactor repo  →  reflex fires  →  cortex bridge  →
+#   cortex `process` handler (spec release-notes)  →  release-notes draft.
+#
+# WHY `create` / `ref_type: tag` (and not `push`):
+#   GitHub's `create` event carries TOP-LEVEL `ref_type` ("tag" | "branch") and
+#   `ref` (the tag name) — both reachable by reflex's v0 flat `where` matcher
+#   (strict top-level field-equality; src/sources/bus.ts:207). A `push` event
+#   would carry the tag only as `refs/tags/<name>` inside `ref`, which needs a
+#   PREFIX match the flat matcher cannot do. So `create` + `ref_type: tag` is the
+#   precise, flat-matchable "a tag appeared" signal.
+#   (Prefer firing on GitHub *Releases* instead of raw tags? Swap the `where` to
+#    `github_event: release` + `action: published` — also flat-matchable — and
+#    subscribe the delivery to "Releases" instead of "Branch or tag creation".)
+#
+# WHERE THE TAG + REPO COME FROM:
+#   The fired Activation Event forwards the GitHub payload. The cortex process
+#   reads the tag from top-level `ref` and the repo from `repository` (full_name,
+#   injected top-level by the source). The `payload` block below carries only
+#   static hints (draft-only); the dynamic values ride the impulse.
+#
+# Target: `@jc/release-notes` — resolved by the cortex `reflex_activation` bridge
+# to a cortex code handler. Reflex never runs the generator; `target` is an opaque
+# Execution Blueprint ref that cortex maps. Required cortex wiring (mirrors
+# build-journal — see docs/deploy-build-journal-weekly.md for the prod pattern):
+#
+#   # 1. drop the spec file on the cortex host:
+#   #      ~/.config/cortex/processes/release-notes.yaml
+#   #        name: release-notes
+#   #        cwd: /abs/path/to/the/release-notes/generator
+#   #        argv: [bun, generate-release-notes.ts, --repo, "{repo}",
+#   #               --tag, "{tag}", --draft]   # <-- the generator is the
+#   #                                          #     cortex-side build; a thin
+#   #                                          #     `gh api .../releases/generate-notes`
+#   #                                          #     or `git log <prev>..<tag>` wrapper
+#   #        detach: true                      # don't block the serial bridge
+#   #        params: { repo: { type: string }, tag: { type: string } }
+#   # 2. bind it in cortex.yaml:
+#   reflex_activation.targets:
+#     - target: "@jc/release-notes"
+#       capability: "process.run"      # free-form label
+#       assistant: cortex              # required by schema; ignored for code handlers
+#       handler: "process"
+#       process: "release-notes"       # → the spec file
+#
+# Deploy (reflex-edge): this is a NEW GitHub delivery (Branch/tag creation),
+# separate from the Issues and Pull-requests deliveries, so it carries its OWN
+# HMAC secret — rotating it never touches the others.
+#   1. Deploy reflex-edge.
+#   2. `wrangler secret put GITHUB_TAG_WEBHOOK_SECRET`   (this delivery's HMAC secret)
+#   3. Load this blueprint into KV (one document per key under `activation/`):
+#        wrangler kv key put --binding=REFLEX_BLUEPRINTS \
+#          activation/tag-release-notes "$(cat examples/tag-release-notes/reflex.yaml)"
+#   4. GitHub org/repo → Settings → Webhooks → Add (a NEW delivery):
+#        Payload URL:  https://<reflex-edge-host>/impulse/tag-release-notes
+#        Content type: application/json
+#        Secret:       <same value as GITHUB_TAG_WEBHOOK_SECRET>
+#        Events:       Branch or tag creation
+#
+# The source verifies X-Hub-Signature-256 (HMAC-SHA256 of the raw body) and
+# injects top-level github_event / repository (full_name) / github_delivery so
+# the flat `where` matcher can target precise events.
+schema: metafactory/activation/v1
+activations:
+  - id: tag-release-notes
+    target: "@jc/release-notes"      # cortex maps → handler: process, process: release-notes
+    when:
+      http:
+        auth:
+          mode: github_hmac
+          secret_env: GITHUB_TAG_WEBHOOK_SECRET   # Worker secret BINDING name (tag-only)
+        where:
+          github_event: create               # from the X-GitHub-Event header
+          ref_type: tag                       # flat top-level payload field — tag, not branch
+    policy: auto                     # auto-fire; the process produces a DRAFT for review, nothing published
+    guards:
+      cooldown: 30s                  # collapse a burst of redeliveries for the same tag
+    payload:
+      draft: true                    # static hint; tag + repo ride the forwarded impulse
