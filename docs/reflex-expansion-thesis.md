@@ -42,7 +42,7 @@ keep.
 
 | Idea | Aperture | Verdict | Why |
 |---|---|---|---|
-| **Dry-run test harness** | meta | **SHIP NOW** | Matcher-independent. Makes every future blueprint safe to change; prevents 3am self-spam; genuine load-bearing piece |
+| **Dry-run test harness** | meta | **MOSTLY EXISTS** | `reflex test <id>` (predicted verdict, zero side effects — `src/cli/main.ts:184`) + `reflex validate` already ship the single-blueprint case. Only gap is an optional *batch/regression* harness (dry-run all blueprints in CI, assert expected verdicts) — small, not greenfield |
 | **Issue-triage** (untriaged, no LLM) | tactical | **SHIP via cortex gate** | v0 matcher *cannot* read `issue.labels` (nested+array — `bus.ts:207`). Cheapest real form = a `skip_authors`-style label gate in cortex on the live delivery; reflex unchanged. Pure "every issue → #triage channel" is redundant with the live issue→Discord |
 | **Tag → release-notes process** | tactical | **SHIP (clean)** | Single impulse → single fire → deterministic process. Archetypal activation, no nested fields |
 | **Nightly sec/dep audit → Discord** | tactical | **SHIP (read-only)** | Same shape as live issue→Discord; aligns w/ day job; no write authority |
@@ -106,14 +106,21 @@ misfire-prevention). Most of the S-tier strategic ideas do not — yet.
 
 ## Net recommendation
 
-1. Ship the **dry-run harness** (matcher-independent, zero new risk, real payoff).
-2. Ship **issue-triage** as a cortex-side label gate on the live delivery
-   (`skip_authors` pattern) — or treat it as the first demand-pull for the
-   bounded matcher extension. Not the free win the debate first assumed.
-3. Re-spec the **watchdog** out-of-band, asserting on the outcome signal.
-4. Land the **`outcome + causation_depth`** event before adding any *reactive*
+Post-debate code probes shrank the "free wins" to almost nothing — which is
+itself the honest result:
+
+1. **Dry-run already ships** (`reflex test` + `reflex validate`). Optional
+   extra: a batch/regression harness in CI. Not a build to prioritise.
+2. **Tag → release-notes** is the most genuinely-buildable-now item in the
+   existing pattern: a deterministic cortex `process` spec (like build-journal)
+   + a reflex blueprint. Low risk, no matcher gap.
+3. **Issue-triage** is NOT free: cortex-side label gate on the live delivery
+   (`skip_authors` pattern), or the first demand-pull for the bounded matcher
+   extension. Pick one when the toil is real.
+4. Re-spec the **watchdog** out-of-band, asserting on the outcome signal.
+5. Land the **`outcome + causation_depth`** event before adding any *reactive*
    blueprint.
-5. **Defer** the matcher until a real gate (triage first) names the exact
+6. **Defer** the matcher until a real gate (triage first) names the exact
    extension needed.
 5. Everything orchestration-shaped stays in **Pulse**.
 
