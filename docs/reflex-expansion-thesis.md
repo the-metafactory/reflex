@@ -4,6 +4,9 @@
 > ideation (tactical/strategic/meta) → 5-member council debate → 3-attacker
 > adversarial pass. Captures *what to build, what to defer, what to kill*, and
 > the guardrails that must land before any new unattended auto-fire.
+>
+> Full reasoning trail (seed idea catalog + all 8 agent transcripts verbatim):
+> [reflex-expansion-thesis-appendix.md](reflex-expansion-thesis-appendix.md).
 
 ## Verdict first
 
