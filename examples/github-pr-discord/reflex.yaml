@@ -1,0 +1,57 @@
+# GitHub-watch Activation Blueprint: fire when a PR is opened on a watched repo
+# so it lands in Discord — driven directly by GitHub's signed HTTP delivery, no
+# laptop in the loop. (GitHub's delivery is an HTTP Impulse to reflex.) This is
+# the issue→Discord path (github-issue-opened) applied to pull requests: same
+# cortex F-6 reflex-activation bridge, same `notify.discord` code capability.
+# End to end: new GitHub PR → cortex bridge → per-repo Discord post, laptop
+# offline.
+#
+#   PR opened on a Metafactor repo  →  reflex fires  →  cortex bridge  →
+#   notify.discord (per-repo URL)  →  Discord post.
+#
+# Target: `@jc/notify-discord` — the SAME target the live issue→Discord
+# blueprint uses; cortex.yaml already maps it to capability `notify.discord`
+# (the per-repo repo→URL map + in-process code handler). No new cortex target
+# wiring — but the `notify.discord` handler must read a `pull_request` payload
+# (title/number/url live under top-level `pull_request`, not `issue`). If it was
+# written issue-only, teach it the PR shape cortex-side; reflex is done once
+# this blueprint fires.
+#
+# WHY a separate blueprint (not a second target on github-pr-opened):
+#   One Activation Blueprint fires exactly one target. Fanning a single PR to
+#   BOTH a Pulse execution AND a Discord post is orchestration — that lives in
+#   Pulse (ActivationChain), never crammed into a reflex `where`. So the Discord
+#   post is its own blueprint with its own impulse route. github-pr-opened
+#   (→ @jc/f-pr-opened) and github-pr-review (→ sage) are unaffected.
+#
+# Deploy (reflex-edge): a NEW GitHub delivery pointed at this blueprint's route.
+# Reuses the SHARED GITHUB_WEBHOOK_SECRET (same as issue-opened / pr-opened).
+#   1. Deploy reflex-edge.
+#   2. `wrangler secret put GITHUB_WEBHOOK_SECRET`   (shared HMAC secret — skip if already set)
+#   3. Load this blueprint into KV (one document per key under `activation/`):
+#        wrangler kv key put --binding=REFLEX_BLUEPRINTS \
+#          activation/github-pr-discord "$(cat examples/github-pr-discord/reflex.yaml)"
+#   4. GitHub org/repo → Settings → Webhooks → Add (a NEW delivery):
+#        Payload URL:  https://<reflex-edge-host>/impulse/github-pr-discord
+#        Content type: application/json
+#        Secret:       <same value as GITHUB_WEBHOOK_SECRET>
+#        Events:       Pull requests
+#
+# The source verifies X-Hub-Signature-256 (HMAC-SHA256 of the raw body) and
+# injects top-level github_event / repository (full_name) / github_delivery so
+# the flat `where` matcher can target precise events.
+schema: metafactory/activation/v1
+activations:
+  - id: github-pr-discord
+    target: "@jc/notify-discord"     # cortex maps → capability notify.discord (same as issue→Discord)
+    when:
+      http:
+        auth:
+          mode: github_hmac
+          secret_env: GITHUB_WEBHOOK_SECRET   # Worker secret BINDING name (shared)
+        where:
+          github_event: pull_request          # from the X-GitHub-Event header
+          action: opened                      # flat top-level payload field
+    policy: auto
+    guards:
+      cooldown: 10s                  # collapse a burst of redeliveries for the same PR

@@ -29,6 +29,7 @@ describe("scenario 1: examples are valid by construction (real loader, no fixtur
       "build-journal-weekly",
       "f-testing",
       "github-issue-opened",
+      "github-pr-discord",
       "github-pr-opened",
       "github-pr-review",
       "pilot-scan",
@@ -47,6 +48,8 @@ describe("scenario 1: examples are valid by construction (real loader, no fixtur
     expect(byId.get("github-issue-opened")!.kind).toBe("http"); // F-6 bridge → notify.discord
     expect(byId.get("github-pr-review")!.kind).toBe("http"); // F-6 bridge → sage code-review
     expect(byId.get("github-pr-review")!.target).toBe("@jc/sage-pr-review");
+    expect(byId.get("github-pr-discord")!.kind).toBe("http"); // PR opened → cortex bridge → notify.discord
+    expect(byId.get("github-pr-discord")!.target).toBe("@jc/notify-discord");
     expect(byId.get("tag-release-notes")!.kind).toBe("http"); // tag pushed → cortex process handler (spec release-notes)
     expect(byId.get("tag-release-notes")!.target).toBe("@jc/release-notes");
   });
@@ -54,7 +57,7 @@ describe("scenario 1: examples are valid by construction (real loader, no fixtur
   it("reflex validate core passes on examples/", async () => {
     const result = await validatePaths([EXAMPLES]);
     expect(result.ok).toBe(true);
-    expect(result.blueprints).toHaveLength(8);
+    expect(result.blueprints).toHaveLength(9);
   });
 });
 
