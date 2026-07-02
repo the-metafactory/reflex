@@ -33,6 +33,7 @@ describe("scenario 1: examples are valid by construction (real loader, no fixtur
       "github-pr-review",
       "pilot-scan",
       "pr-stats-daily",
+      "tag-release-notes",
     ]);
     expect(byId.get("pr-stats-daily")!.kind).toBe("schedule");
     expect(byId.get("pr-stats-daily")!.guards).toEqual({ cooldownMs: 21_600_000, runLock: "skip" });
@@ -46,12 +47,14 @@ describe("scenario 1: examples are valid by construction (real loader, no fixtur
     expect(byId.get("github-issue-opened")!.kind).toBe("http"); // F-6 bridge → notify.discord
     expect(byId.get("github-pr-review")!.kind).toBe("http"); // F-6 bridge → sage code-review
     expect(byId.get("github-pr-review")!.target).toBe("@jc/sage-pr-review");
+    expect(byId.get("tag-release-notes")!.kind).toBe("http"); // tag pushed → cortex process handler (spec release-notes)
+    expect(byId.get("tag-release-notes")!.target).toBe("@jc/release-notes");
   });
 
   it("reflex validate core passes on examples/", async () => {
     const result = await validatePaths([EXAMPLES]);
     expect(result.ok).toBe(true);
-    expect(result.blueprints).toHaveLength(7);
+    expect(result.blueprints).toHaveLength(8);
   });
 });
 
