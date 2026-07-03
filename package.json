@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#v0.5.0",
+    "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#v0.6.0",
     "commander": "^15.0.0",
     "croner": "^10.0.1",
     "drizzle-orm": "^0.45.2",
