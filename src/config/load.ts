@@ -25,8 +25,9 @@ function expandHome(path: string): string {
  */
 export function resolveConfigPath(options: LoadOptions, env: Record<string, string | undefined>): string {
   if (options.configPath !== undefined) return options.configPath;
-  const fromEnv = env.REFLEX_CONFIG;
-  if (fromEnv === undefined || fromEnv === "") return DEFAULT_CONFIG_PATH;
+  // Expanded here: service units (systemd `Environment=`) pass `~/` literally.
+  const fromEnv = env.REFLEX_CONFIG && expandHome(env.REFLEX_CONFIG);
+  if (!fromEnv) return DEFAULT_CONFIG_PATH;
   if (!existsSync(fromEnv)) {
     throw new Error(`REFLEX_CONFIG names a config file that does not exist: ${fromEnv}`);
   }

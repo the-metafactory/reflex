@@ -40,6 +40,13 @@ describe("REFLEX_CONFIG", () => {
     expect(DEFAULT_CONFIG_PATH).toBe(join(homedir(), ".config/reflex/config.yaml"));
   });
 
+  it("expands a literal leading ~/ (service units do not)", () => {
+    const missing = "~/reflex-no-such-dir/personal.yaml";
+    expect(() => resolveConfigPath({}, { REFLEX_CONFIG: missing })).toThrow(
+      join(homedir(), "reflex-no-such-dir/personal.yaml"),
+    );
+  });
+
   it("naming a missing file throws naming the path — no env-only fallback", () => {
     const missing = join(tmpdir(), "reflex-no-such-dir", "personal.yaml");
     // Complete env config present: a fallback would succeed, so a throw
