@@ -7,8 +7,31 @@ import { configSchema, type ReflexConfig } from "./schema";
 export const DEFAULT_CONFIG_PATH = join(homedir(), ".config/reflex/config.yaml");
 
 export interface LoadOptions {
+  /** Wins over `REFLEX_CONFIG`; default `DEFAULT_CONFIG_PATH`. */
   configPath?: string;
   env?: Record<string, string | undefined>;
+}
+
+/** Expand a leading `~/` to the home directory; other paths pass through. */
+function expandHome(path: string): string {
+  return path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+}
+
+/**
+ * Config file: explicit option, else `REFLEX_CONFIG` (empty = unset, like
+ * the other REFLEX_* vars), else the default path. A `REFLEX_CONFIG` naming
+ * a missing file throws — a typo must not start an instance on env-only
+ * config, i.e. on the default instance's stack (reflex#36).
+ */
+export function resolveConfigPath(options: LoadOptions, env: Record<string, string | undefined>): string {
+  if (options.configPath !== undefined) return options.configPath;
+  // Expanded here: service units (systemd `Environment=`) pass `~/` literally.
+  const fromEnv = env.REFLEX_CONFIG && expandHome(env.REFLEX_CONFIG);
+  if (!fromEnv) return DEFAULT_CONFIG_PATH;
+  if (!existsSync(fromEnv)) {
+    throw new Error(`REFLEX_CONFIG names a config file that does not exist: ${fromEnv}`);
+  }
+  return fromEnv;
 }
 
 /** Deep-set a dotted path on a plain object (small, local — no library). */
@@ -49,8 +72,8 @@ const ENV_MAP: Array<{ env: string; path: string[]; parse?: (raw: string) => unk
  * is valid; validation errors name the offending field.
  */
 export function loadConfig(options: LoadOptions = {}): ReflexConfig {
-  const configPath = options.configPath ?? DEFAULT_CONFIG_PATH;
   const env = options.env ?? process.env;
+  const configPath = resolveConfigPath(options, env);
 
   let raw: Record<string, unknown> = {};
   if (existsSync(configPath)) {
@@ -89,5 +112,6 @@ export function loadConfig(options: LoadOptions = {}): ReflexConfig {
     sovereignty: parsed.sovereignty,
     watchRoots: parsed.watch_roots,
     activationsDir: parsed.activations_dir,
+    ...(parsed.state_dir !== undefined ? { stateDir: expandHome(parsed.state_dir) } : {}),
   };
 }

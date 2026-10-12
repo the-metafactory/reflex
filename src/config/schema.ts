@@ -45,6 +45,10 @@ export const configSchema = z.object({
     .string()
     .min(1)
     .default(join(homedir(), ".config/reflex/activations")),
+  /** Directory holding this instance's reflex.db (a leading `~/` expands).
+   * Unset: the XDG state path (`defaultDbPath()`). A second instance on one
+   * machine sets its own so the two never share a DB (reflex#36). */
+  state_dir: z.string().min(1).optional(),
 });
 
 export interface ReflexConfig {
@@ -55,4 +59,6 @@ export interface ReflexConfig {
   sovereignty: z.infer<typeof sovereigntySchema>;
   watchRoots: string[];
   activationsDir: string;
+  /** Absolute (`~/` already expanded); undefined = default DB path. */
+  stateDir?: string;
 }
