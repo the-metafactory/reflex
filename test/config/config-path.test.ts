@@ -3,12 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTransport } from "@the-metafactory/myelin";
-import { createReflexBus } from "../src/bus";
-import { runCommand } from "../src/cli/main";
-import { DEFAULT_CONFIG_PATH, loadConfig, resolveConfigPath } from "../src/config/load";
-import { startDaemon } from "../src/daemon";
-import { dbPathFor, defaultDbPath } from "../src/store/paths";
-import { testConfig } from "./helpers";
+import { createReflexBus } from "../../src/bus";
+import { runCommand } from "../../src/cli/main";
+import { DEFAULT_CONFIG_PATH, loadConfig, resolveConfigPath } from "../../src/config/load";
+import { startDaemon } from "../../src/daemon";
+import { dbPathFor, defaultDbPath } from "../../src/store/paths";
+import { testConfig } from "../helpers";
 
 // reflex#36: a second instance on one machine gets its own config file
 // (REFLEX_CONFIG) and its own DB (state_dir).
@@ -110,7 +110,7 @@ describe("REFLEX_CONFIG naming a missing file fails startup", () => {
 
   it("daemon exits non-zero naming the path", () => {
     const missing = join(tmpdir(), "reflex-no-such-dir", "daemon.yaml");
-    const proc = Bun.spawnSync(["bun", join(import.meta.dir, "../src/bin/reflex-daemon.ts")], {
+    const proc = Bun.spawnSync(["bun", join(import.meta.dir, "../../src/bin/reflex-daemon.ts")], {
       env: { ...process.env, REFLEX_CONFIG: missing, REFLEX_PRINCIPAL: "jc" },
     });
     expect(proc.exitCode).not.toBe(0);
