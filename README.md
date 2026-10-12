@@ -11,6 +11,37 @@ Reflex initiates work; it never orchestrates it.
 - [Reflex v0 design](docs/design-reflex-v0.md) — architecture, decision pipeline, wire protocol, CLI
 - Feature graph: [blueprint.yaml](blueprint.yaml) (R-100…R-110)
 
+## Configuration
+
+The daemon (`reflex-daemon`) and the CLI (`reflex`) read a YAML config file, overlaid by `REFLEX_*` env vars (env wins).
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `REFLEX_CONFIG` (env) | `~/.config/reflex/config.yaml` | Config file to read. Empty counts as unset. If it names a file that does not exist, the daemon and CLI exit non-zero naming the path; they never fall back to env-only config. |
+| `state_dir` (config) | `$XDG_STATE_HOME/reflex`, else `~/.local/state/reflex` | Directory holding the daemon's `reflex.db`. A leading `~/` expands. |
+
+### Two instances on one machine
+
+Each instance needs its own config file, its own `stack`, and its own `state_dir`, so the two never share a config or a DB:
+
+```yaml
+# ~/.config/reflex/personal.yaml
+principal: jc
+stack: personal
+state_dir: ~/.local/state/reflex-personal
+activations_dir: /Users/jc/.config/reflex/personal-activations   # no ~/ expansion here
+```
+
+Only `state_dir` expands `~/`; give `activations_dir` and `watch_roots` absolute paths. Without its own `activations_dir`, the second instance loads the default instance's blueprints and fires them too.
+
+```sh
+reflex-daemon                                                     # default instance
+REFLEX_CONFIG=~/.config/reflex/personal.yaml reflex-daemon        # personal instance
+REFLEX_CONFIG=~/.config/reflex/personal.yaml reflex status        # CLI against the personal instance
+```
+
+The CLI never opens the DB; it reaches its daemon over the bus, addressed by the config's `principal` and `stack`.
+
 ## Boundaries
 
 | Reflex does | Reflex does not |

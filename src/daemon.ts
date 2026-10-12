@@ -12,11 +12,11 @@ import { BusSource } from "./sources/bus";
 import { HttpSource } from "./sources/http";
 import { ScheduleSource } from "./sources/schedule";
 import { openDb } from "./store/db";
-import { defaultDbPath } from "./store/paths";
+import { dbPathFor } from "./store/paths";
 import { Repository } from "./store/repository";
 
 export interface DaemonOptions {
-  /** Override DB path (tests). Default: XDG state path. */
+  /** Override DB path (tests). Default: `cfg.stateDir`, else the XDG state path. */
   dbPath?: string;
   /** HTTP listener port (0 = ephemeral). Default 7717. */
   httpPort?: number;
@@ -52,7 +52,7 @@ export interface ReflexDaemon extends ReflexDaemonHandle {
  * through their own paths (watcher last-good-set, bus outage queue).
  */
 export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}): Promise<ReflexDaemon> {
-  const { db, close: closeDb } = openDb(options.dbPath ?? defaultDbPath());
+  const { db, close: closeDb } = openDb(options.dbPath ?? dbPathFor(cfg));
   let bus: ReflexBus | undefined;
   try {
     return await assemble();

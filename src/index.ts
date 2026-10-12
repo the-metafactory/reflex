@@ -40,7 +40,7 @@ export { discoverActivationFiles, type DiscoverOptions } from "./activation/sour
 export { ActivationWatcher, type WatcherOptions } from "./activation/watcher";
 export { validatePaths, type ValidationResult } from "./activation/validate-cli";
 export { openDb, type ReflexDb } from "./store/db";
-export { defaultDbPath } from "./store/paths";
+export { dbPathFor, defaultDbPath } from "./store/paths";
 export {
   ConflictError,
   Repository,
