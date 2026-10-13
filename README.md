@@ -61,7 +61,7 @@ reflex service uninstall --instance personal
 | logs (macOS) | `~/.config/reflex/logs/` | `~/.config/reflex/logs/personal/` |
 | `REFLEX_CONFIG` in the unit | not set | the `--config` path, made absolute |
 
-`install --instance` needs `--config` naming an existing file. Instance names match `^[a-z0-9][a-z0-9-]{0,31}$`; any other name fails before a file or `launchctl` is touched. Every verb with `--instance` acts on that service only.
+`install --instance` needs `--config` naming an existing, valid config that sets `state_dir` (read as the unit will: the file alone, no `REFLEX_*` overlay); without `state_dir` the two daemons would share one `reflex.db`. Instance names match `^[a-z0-9][a-z0-9-]{0,31}$`; any other name fails before a file or `launchctl` is touched. Every verb with `--instance` acts on that service only.
 
 ## Boundaries
 

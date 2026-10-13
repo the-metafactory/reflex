@@ -13,6 +13,7 @@ import {
   type CommandContext,
   type Invocation,
 } from "./commands";
+import { loadConfig } from "../config/load";
 import { renderLaunchdPlist, renderSystemdUnit, SERVICE_LABEL, type UnitContext } from "./units";
 
 export interface ServiceResult {
@@ -57,11 +58,49 @@ const realHost = (): ServiceHost => ({
   cwd: process.cwd(),
 });
 
+/** Per-service names: the default service, or the `<instance>`-suffixed set. */
+function serviceNames(instance: string | undefined): {
+  label: string;
+  unitName: string;
+  logsSubdir: string;
+  instanceArgs: string;
+} {
+  return instance === undefined
+    ? { label: SERVICE_LABEL, unitName: "reflex", logsSubdir: ".config/reflex/logs", instanceArgs: "" }
+    : {
+        label: `${SERVICE_LABEL}.${instance}`,
+        unitName: `reflex-${instance}`,
+        logsSubdir: join(".config/reflex/logs", instance),
+        instanceArgs: ` --instance ${instance}`,
+      };
+}
+
+/**
+ * The named instance's config, checked as its daemon will read it: the
+ * file alone (the unit sets no REFLEX_* overlay). It must be valid and set
+ * `state_dir`, or the two daemons would share the default reflex.db.
+ */
+function checkInstanceConfig(instance: string, config: string | undefined, cwd: string): string {
+  if (config === undefined) {
+    throw new Error(`install --instance ${instance} needs --config <path>`);
+  }
+  const path = resolve(cwd, config);
+  if (!existsSync(path) || !statSync(path).isFile()) {
+    throw new Error(`--config file does not exist: ${path}`);
+  }
+  const loaded = loadConfig({ configPath: path, env: {} });
+  if (loaded.stateDir === undefined) {
+    throw new Error(`--config ${path} sets no state_dir — the instance would share the default service's reflex.db`);
+  }
+  return path;
+}
+
 /**
  * Resolve every path, name and env entry a service verb touches. Throws —
  * before any file write or launchctl/systemctl call — on a bad instance
  * name, a `--config` without `--instance`, or an install whose config is
- * missing. No `--instance` yields exactly the pre-#37 default service.
+ * missing, invalid or without `state_dir`. No `--instance` yields exactly
+ * the pre-#37 default service.
  */
 export function buildServiceContext(verb: string, options: ServiceOptions = {}, host: ServiceHost = realHost()): ServiceContext {
   const platform = assertSupported(host.platform);
@@ -72,21 +111,11 @@ export function buildServiceContext(verb: string, options: ServiceOptions = {}, 
   if (instance === undefined && options.config !== undefined) {
     throw new Error("--config needs --instance; the default service reads the default config");
   }
-  let reflexConfig: string | undefined;
-  if (instance !== undefined && verb === "install") {
-    if (options.config === undefined) {
-      throw new Error(`install --instance ${instance} needs --config <path>`);
-    }
-    reflexConfig = resolve(host.cwd, options.config);
-    if (!existsSync(reflexConfig) || !statSync(reflexConfig).isFile()) {
-      throw new Error(`--config file does not exist: ${reflexConfig}`);
-    }
-  }
+  const reflexConfig =
+    instance !== undefined && verb === "install" ? checkInstanceConfig(instance, options.config, host.cwd) : undefined;
 
-  const label = instance === undefined ? SERVICE_LABEL : `${SERVICE_LABEL}.${instance}`;
-  const unitName = instance === undefined ? "reflex" : `reflex-${instance}`;
-  const logsDir =
-    instance === undefined ? join(host.home, ".config/reflex/logs") : join(host.home, ".config/reflex/logs", instance);
+  const { label, unitName, logsSubdir, instanceArgs } = serviceNames(instance);
+  const logsDir = join(host.home, logsSubdir);
   const unit: UnitContext = {
     label,
     bunPath: process.execPath,
@@ -105,10 +134,16 @@ export function buildServiceContext(verb: string, options: ServiceOptions = {}, 
     cmd: { platform, label, unitPath, unit: unitName, uid: host.uid },
     unitPath,
     logsDir,
-    installHint:
-      instance === undefined ? "reflex service install" : `reflex service install --instance ${instance} --config <path>`,
-    startHint: instance === undefined ? "reflex service start" : `reflex service start --instance ${instance}`,
+    installHint: `reflex service install${instanceArgs}${instance === undefined ? "" : " --config <path>"}`,
+    startHint: `reflex service start${instanceArgs}`,
   };
+}
+
+/** The bun interpreter a rendered unit runs: the first ProgramArguments
+ * entry (plist) or the first ExecStart word (systemd, quotes stripped). */
+export function recordedBunPath(unitText: string): string | undefined {
+  const match = unitText.match(/<key>ProgramArguments<\/key>\s*<array>\s*<string>([^<]*)<\/string>|^ExecStart="((?:[^"\\]|\\.)*)"/m);
+  return match?.[1] ?? match?.[2]?.replaceAll('\\"', '"').replaceAll("\\\\", "\\");
 }
 
 async function execute(invocations: Invocation[]): Promise<ServiceResult | null> {
@@ -180,8 +215,7 @@ export async function serviceCommand(verb: string, options: ServiceOptions = {})
       ];
       // Stale-interpreter check: the unit references the bun resolved at
       // install time; a missing path means the service can't restart.
-      const recorded = readFileSync(unitPath, "utf-8").match(/<string>([^<]*bun[^<]*)<\/string>|ExecStart=(\S+)/);
-      const recordedBun = recorded?.[1] ?? recorded?.[2];
+      const recordedBun = recordedBunPath(readFileSync(unitPath, "utf-8"));
       if (recordedBun && !existsSync(recordedBun)) {
         lines.push(`warning: unit references missing bun at ${recordedBun} — run: ${installHint}`);
       }

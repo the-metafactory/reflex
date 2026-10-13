@@ -10,7 +10,7 @@ import {
   stopSequence,
   uninstallSequence,
 } from "../../src/service/commands";
-import { buildServiceContext, serviceCommand } from "../../src/service/run";
+import { buildServiceContext, recordedBunPath, serviceCommand } from "../../src/service/run";
 import { renderLaunchdPlist, renderSystemdUnit, SERVICE_LABEL } from "../../src/service/units";
 
 // reflex#37: a named second service next to the default one.
@@ -36,10 +36,10 @@ describe("default service render is unchanged", () => {
 
 const host = (platform: string, cwd = "/work") => ({ platform, home: "/home/op", uid: 501, cwd });
 
-function configFile(): string {
+function configFile(content = "principal: jc\nstack: personal\nstate_dir: /srv/op/state/reflex-personal\n"): string {
   const dir = mkdtempSync(join(tmpdir(), "reflex-svc-"));
   const path = join(dir, "personal.yaml");
-  writeFileSync(path, "principal: jc\nstack: personal\n");
+  writeFileSync(path, content);
   return path;
 }
 
@@ -179,5 +179,31 @@ describe("validation fails closed before any effect", () => {
       host("darwin", dirname(config)),
     );
     expect(ctx.unit.reflexConfig).toBe(config);
+  });
+});
+
+describe("install --instance refuses a config that would share the default DB", () => {
+  it("no state_dir → throws naming the config", () => {
+    const config = configFile("principal: jc\nstack: personal\n");
+    expect(() => buildServiceContext("install", { instance: "personal", config }, host("darwin"))).toThrow(
+      `--config ${config} sets no state_dir`,
+    );
+  });
+
+  it("an invalid config → throws (validated as the daemon will read it)", () => {
+    const config = configFile("stack: personal\nstate_dir: /x\n");
+    expect(() => buildServiceContext("install", { instance: "personal", config }, host("darwin"))).toThrow(/principal/);
+  });
+});
+
+describe("recordedBunPath (status stale-interpreter check)", () => {
+  it("plist: the first ProgramArguments entry, not a Label containing 'bun'", () => {
+    const ctx = buildServiceContext("install", { instance: "bunny", config: configFile() }, host("darwin"));
+    expect(recordedBunPath(renderLaunchdPlist(ctx.unit))).toBe(process.execPath);
+  });
+
+  it("systemd: the first ExecStart word with its quotes stripped", () => {
+    expect(recordedBunPath(renderSystemdUnit({ ...base, bunPath: "/opt/my bun/bin/bun" }))).toBe("/opt/my bun/bin/bun");
+    expect(recordedBunPath(renderSystemdUnit(base))).toBe("/opt/bun/bin/bun");
   });
 });
