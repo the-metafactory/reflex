@@ -145,6 +145,7 @@ export class Pipeline {
     await Promise.all([
       this.bus.publishFired({
         target: blueprint.target,
+        serves: blueprint.serves,
         payload: { ...blueprint.payload, ...impulse.payload },
         idempotencyKey: check.idempotencyKey,
         decisionId: decision.id,

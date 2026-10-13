@@ -115,12 +115,29 @@ const runLockSchema = z.union([z.literal("skip"), z.literal("buffer")], {
   }),
 });
 
+const servesIdSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .regex(/^[^\s\p{Cc}]+$/u, { message: "must be an ID without whitespace or control characters" });
+
+const servesSchema = z
+  .object({
+    goal: servesIdSchema.optional(),
+    node: servesIdSchema.optional(),
+  })
+  .strict()
+  .refine((serves) => serves.goal !== undefined || serves.node !== undefined, {
+    message: "at least one of goal or node is required",
+  });
+
 const entrySchema = z
   .object({
     id: z
       .string()
       .regex(/^[a-z0-9][a-z0-9-]*$/, { message: "id must be a lowercase slug ([a-z0-9-])" }),
     target: z.string().min(1),
+    serves: servesSchema.optional(),
     when: whenSchema,
     policy: z.enum(["auto", "approval", "disabled"]).default("auto"),
     approval_timeout: durationSchema.default("1h"),
@@ -191,6 +208,7 @@ export function parseActivationDocument(text: string, sourceFile: string): Activ
     return {
       id: entry.id,
       target: entry.target,
+      ...(entry.serves !== undefined ? { serves: entry.serves } : {}),
       kind,
       when: normalizeWhen(entry.when as Record<string, unknown>, kind),
       policy: entry.policy,
