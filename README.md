@@ -13,6 +13,8 @@ Reflex initiates work; it never orchestrates it.
 
 ## Configuration
 
+An Activation Blueprint may declare `serves: {goal: "G1", node: "the-metafactory/soma#781"}` beside `target`; either ID may be supplied alone. The strict object requires at least one ID, each 1–200 characters without whitespace or control characters. Use goal IDs only; goal text stays in soma-home. Every `reflex.activation.fired` envelope carries the declaration as `payload.serves`, beside `payload.target` and outside the Activation Payload (`payload.payload`), for the runner to consume. Omitting `serves` leaves it absent from the fired payload.
+
 The daemon (`reflex-daemon`) and the CLI (`reflex`) read a YAML config file, overlaid by `REFLEX_*` env vars (env wins).
 
 | Setting | Default | Meaning |

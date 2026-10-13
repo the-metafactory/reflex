@@ -42,7 +42,7 @@ describe("ActivationWatcher", () => {
     const { central, store, watcher } = await setup();
     const before = store.current();
     writeFileSync(join(central, "a.yaml"), "schema: wrong\nactivations: [");
-    await Bun.sleep(400); // give the watcher a chance to (not) break things
+    await until(() => watcher.lastError() !== null);
     expect(store.current()).toBe(before); // identity: untouched
     expect(watcher.lastError()).toContain("a.yaml");
     await watcher.stop();

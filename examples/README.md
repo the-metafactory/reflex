@@ -8,6 +8,8 @@ Validate anything without a daemon or NATS:
 reflex validate examples/
 ```
 
+Add `serves: {goal: "G1", node: "the-metafactory/soma#781"}` beside an Activation Blueprint's `target` to declare the goal/node it serves; either ID may stand alone. Only `goal` and `node` are accepted, at least one is required, and each ID must be 1–200 characters with no whitespace or control characters. Goal text stays in soma-home. The declaration travels in every fired envelope as `payload.serves`, outside the Activation Payload (`payload.payload`); omit the key to retain the existing fired payload.
+
 ## pr-stats-daily — schedule
 
 Fires `@jc/f-pr-stats` every morning at 07:00 Europe/Zurich.

@@ -44,6 +44,8 @@ function assertUuid(value: string, field: string): void {
 export interface ActivationFiredInput {
   /** Target Execution Blueprint reference (opaque to Reflex). */
   target: string;
+  /** Blueprint-declared goal/node IDs, separate from the Activation Payload. */
+  serves?: { goal?: string; node?: string };
   /** Activation Payload, shaped toward the target's Run Contract. */
   payload: Record<string, unknown>;
   idempotencyKey: string;
@@ -66,6 +68,7 @@ export function buildActivationFired(
     correlation_id: input.correlationId,
     payload: {
       target: input.target,
+      ...(input.serves !== undefined ? { serves: input.serves } : {}),
       payload: input.payload,
       idempotency_key: input.idempotencyKey,
       decision_id: input.decisionId,
