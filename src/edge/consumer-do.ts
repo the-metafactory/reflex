@@ -50,7 +50,7 @@ interface Runtime {
  * D1 additionally CAS at the storage layer.
  *
  * The DO holds the myelin WebSocket bus connection (durable subscriptions for
- * bus-kind blueprints + the pulse run-outcome consumer). A self-rescheduling
+ * bus-kind blueprints + the execution.run.finished consumer). A self-rescheduling
  * alarm is the scheduler heartbeat (F-002): it evaluates due schedule
  * blueprints AND refreshes the blueprint set from KV on cadence — so reflex,
  * not Cloudflare Cron Triggers, owns the schedule clock. v0 uses a plain held

@@ -19,7 +19,7 @@ host. The stateless Worker forwards impulse HTTP traffic and Cron Trigger
 firings into it, so per-blueprint serialization holds deployment-wide exactly
 like the local daemon process; D1 CAS additionally guards at the storage
 layer. The DO holds the bus connection (durable subscriptions for bus-kind
-blueprints + the pulse run-outcome consumer) and refreshes blueprints from KV
+blueprints + the `execution.run.finished` consumer) and refreshes blueprints from KV
 every 5 minutes via alarm.
 
 ## Deploy gates (DD-122 — read before any production traffic)

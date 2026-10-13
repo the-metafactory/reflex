@@ -197,7 +197,7 @@ describe("scenario 4: buffer holds newest, re-presents once", () => {
     await close();
   });
 
-  it("unknown correlation is a warn no-op", async () => {
+  it("unknown correlation is a debug no-op", async () => {
     const { pipeline, ready, close } = rig([bp()]);
     await ready;
     expect(await pipeline.onRunCompleted(crypto.randomUUID(), "succeeded")).toBeNull();

@@ -85,7 +85,7 @@ The full pipeline ships in v0 — including approval. Decision records are first
 
 A `cancel` conflict mode is **rejected** — stopping a running execution is a Cortex Control Command / Pulse concern; Reflex initiating a cancel would violate its boundary.
 
-**Buffered Impulse semantics:** depth 1, newest replaces older. The buffering evaluation itself records a terminal Blocked Decision. When the run-outcome event releases the lock, the held impulse is **re-presented**: a fresh Activation Decision is produced, **all guards re-run** (a meanwhile-engaged cooldown blocks it too), and the new decision links to the Blocked Decision that buffered it. Buffer requires Reflex to observe run completion: it subscribes to `mf.{net}.pulse.run.>` outcome events (P-503) and matches on the correlation id it stamped into the Activation Event.
+**Buffered Impulse semantics:** depth 1, newest replaces older. The buffering evaluation itself records a terminal Blocked Decision. When the run-outcome event releases the lock, the held impulse is **re-presented**: a fresh Activation Decision is produced, **all guards re-run** (a meanwhile-engaged cooldown blocks it too), and the new decision links to the Blocked Decision that buffered it. Buffer requires Reflex to observe run completion: it subscribes to validated `local.{principal}.{stack}.execution.run.finished` envelopes and matches `payload.correlation_id` to the correlation id it stamped into the Activation Event (Vigil Q23/Q34). Every Run Outcome (`succeeded`, `failed`, `cancelled`, `blocked`) is terminal and releases the lock; unrelated runs are ignored.
 
 ## 4. Impulse Sources (v0)
 
@@ -208,7 +208,7 @@ TypeScript + Bun. Dependencies: `@nats-io/transport-node` + `@nats-io/jetstream`
 
 ## 11. Paired Work
 
-- **pulse:** update P-501 — consume `mf.{net}.reflex.activation.fired.>`, rename `CueSubscriber` → `ActivationSubscriber`, event type `reflex.activation.fired` (pulse#27)
+- **runner:** consume `local.{principal}.{stack}.reflex.activation.fired` and report `execution.run.finished` with the fire id in `payload.correlation_id` (Vigil Q23/Q34).
 - **meta-factory:** CONTEXT.md amended (grill session 2026-06-10): Decision taxonomy extended with **Denied Decision** + **Expired Decision**; Matched declared the only non-terminal outcome. DD-67/70/71 examples mention `cue.fired` — annotate with rename note on next DD pass (naming only)
 
 ## 12. Design Session Decisions
