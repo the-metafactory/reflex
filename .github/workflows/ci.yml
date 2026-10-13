@@ -1,0 +1,37 @@
+name: CI
+
+# Tests + typecheck on every PR and on main. Ranger's merge desk waits for a
+# green check run on the PR head and cites one when it closes the node, so a
+# repo without CI never gets a merge card. Integration suites self-skip here:
+# no NATS on the runner (test/integration/_guard.ts).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test & typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Tests
+        run: bun run test
+
+      - name: Typecheck
+        run: bun run typecheck
