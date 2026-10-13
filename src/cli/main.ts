@@ -225,10 +225,20 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
 
   program
     .command("service <verb>")
-    .description("Manage the daemon as a launchd LaunchAgent (macOS) or systemd user unit (Linux).\nExample: reflex service install   (verbs: install|uninstall|start|stop|status|logs)")
+    .description(
+      "Manage the daemon as a launchd LaunchAgent (macOS) or systemd user unit (Linux).\n" +
+        "Example: reflex service install   (verbs: install|uninstall|start|stop|status|logs)\n" +
+        "Named second service: reflex service install --instance personal --config ~/.config/reflex/personal.yaml",
+    )
     .option("--follow", "follow logs (logs verb)")
+    .option("--instance <name>", "act on the named service ai.meta-factory.reflex.<name> instead of the default")
+    .option("--config <path>", "config file the named instance reads (install --instance only)")
     .action(async (verb: string, opts: Record<string, unknown>) => {
-      result = await serviceCommand(verb, { follow: Boolean(opts.follow) });
+      result = await serviceCommand(verb, {
+        follow: Boolean(opts.follow),
+        ...(typeof opts.instance === "string" ? { instance: opts.instance } : {}),
+        ...(typeof opts.config === "string" ? { config: opts.config } : {}),
+      });
     });
 
   try {
