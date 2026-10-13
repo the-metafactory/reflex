@@ -25,7 +25,7 @@ When a `tasks.review.completed` envelope with `flow: review` appears on the bus,
 1. `reflex pending` — see Matched Decisions awaiting approval
 2. `reflex approve <decision-id>` — guards re-run, then the Activation Event fires (or `reflex deny <decision-id>`)
 3. Unanswered for 1h → **Expired Decision** (reason `timeout`)
-4. `run_lock: buffer`: a second match during the in-flight run becomes the **Buffered Impulse** — re-presented exactly once when the run-outcome event arrives.
+4. `run_lock: buffer`: a second match during the in-flight run becomes the **Buffered Impulse** — re-presented exactly once when a valid `execution.run.finished` envelope arrives on `local.{principal}.{stack}.execution.run.finished` with `payload.correlation_id` equal to the fired Activation Event's correlation id. All four outcomes (`succeeded`, `failed`, `cancelled`, `blocked`) release the Run Lock; `run_lock: skip` uses the same completion contract.
 
 ## f-testing — manual
 

@@ -225,12 +225,12 @@ export class Pipeline {
 
   /**
    * Run Lock release + Buffered Impulse re-presentation (FR-6). Called by
-   * R-108 when a terminal run outcome arrives for a correlation we stamped.
+   * BusSource when a validated execution.run.finished arrives for a correlation we stamped.
    */
   async onRunCompleted(correlationId: string, _outcome: string): Promise<EvaluateResult | null> {
     const fired = await this.repo.findFiredByCorrelation(correlationId);
     if (!fired) {
-      console.warn(`[reflex-pipeline] run outcome for unknown correlation ${correlationId} — ignoring`);
+      console.debug(`[reflex-pipeline] run outcome for unknown correlation ${correlationId} — ignoring`);
       return null;
     }
     const decision = await this.repo.getDecision(fired.decisionId);

@@ -5,7 +5,7 @@ import type { ReflexBus } from "../bus";
 import type { ReflexConfig } from "../config/schema";
 import type { EvaluateResult, Impulse } from "../pipeline/impulse";
 import type { RepositoryPort } from "../store/port";
-import { runOutcomeSubject, terminalOutcomeOf } from "./run-outcome";
+import { readRunFinished, runOutcomeSubject } from "./run-outcome";
 
 /** Pipeline slice the bus source needs — injectable for tests. */
 export interface BusSink {
@@ -54,9 +54,15 @@ export class BusSource {
     await this.sync();
     this.flushTimer = setInterval(() => void this.flushIgnored(), 5_000);
     this.outcomeSub = await this.bus.subscribe(runOutcomeSubject(this.cfg), async (envelope) => {
-      const outcome = terminalOutcomeOf(envelope.type);
-      if (!outcome || !envelope.correlation_id) return;
-      await this.sink.onRunCompleted(envelope.correlation_id, outcome);
+      const finished = readRunFinished(envelope);
+      if (!finished.valid) {
+        console.warn(
+          `[reflex-bus-source] invalid execution.run.finished envelope ${envelope.id}: ` +
+            finished.errors.map((error) => `${error.field}: ${error.message}`).join("; "),
+        );
+        return;
+      }
+      await this.sink.onRunCompleted(finished.correlationId, finished.outcome);
     });
   }
 

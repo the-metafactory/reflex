@@ -1,65 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { createTransport, createEnvelope } from "@the-metafactory/myelin";
-import { BlueprintStore } from "../../src/activation/store";
-import type { ActivationBlueprint } from "../../src/activation/types";
-import { createReflexBus } from "../../src/bus";
-import { Pipeline } from "../../src/pipeline/evaluate";
-import { BusSource, matches } from "../../src/sources/bus";
-import { runOutcomeSubject, terminalOutcomeOf } from "../../src/sources/run-outcome";
-import { openDb } from "../../src/store/db";
-import { Repository } from "../../src/store/repository";
-import { testConfig } from "../helpers";
-
-const cfg = testConfig();
-const TASK_SUBJECT = `local.${cfg.principal}.${cfg.stack}.tasks.review.completed`;
-
-function busBp(id: string, subject = TASK_SUBJECT, where?: Record<string, string | number | boolean>, overrides: Partial<ActivationBlueprint> = {}): ActivationBlueprint {
-  return {
-    id,
-    target: `@jc/${id}`,
-    kind: "bus",
-    when: { bus: { subject, ...(where ? { where } : {}) } },
-    policy: "auto",
-    approvalTimeoutMs: 3_600_000,
-    guards: {},
-    payload: {},
-    sourceFile: "/tmp/x.yaml",
-    ...overrides,
-  };
-}
-
-async function rig(blueprints: ActivationBlueprint[], nowRef = { now: "2026-06-10T12:00:00.000Z" }) {
-  const { db, close } = openDb(":memory:");
-  const repo = new Repository(db);
-  const store = new BlueprintStore(blueprints);
-  const bus = createReflexBus(cfg, { transport: createTransport({ type: "memory" }) });
-  const pipeline = new Pipeline({ store, repo, bus, nowFn: () => nowRef.now });
-  const source = new BusSource(cfg, store, bus, pipeline, repo);
-  await source.start();
-  return {
-    repo,
-    store,
-    bus,
-    source,
-    nowRef,
-    publish: async (subject: string, payload: Record<string, unknown>, type = "tasks.review.completed", correlationId?: string) => {
-      const envelope = createEnvelope({
-        source: `${cfg.principal}.tasks.review`,
-        type,
-        payload,
-        correlation_id: correlationId,
-        sovereignty: cfg.sovereignty,
-      });
-      await bus.raw.publish(subject, envelope);
-      await Bun.sleep(20);
-    },
-    close: async () => {
-      await source.stop();
-      await bus.close();
-      close();
-    },
-  };
-}
+import { executionRunFinishedSubject } from "@the-metafactory/myelin/edge";
+import { matches } from "../../src/sources/bus";
+import { busBp, cfg, rig, runFinishedEnvelope, TASK_SUBJECT } from "./bus-rig";
 
 describe("matcher", () => {
   it("property: match iff every where-entry strict-equals", () => {
@@ -73,20 +15,6 @@ describe("matcher", () => {
     }
     expect(matches(undefined, { x: 1 })).toBe(true);
     expect(matches({ missing: 1 }, { x: 1 })).toBe(false); // absent ≠ equal
-  });
-});
-
-describe("run-outcome contract module", () => {
-  it("detects terminal outcomes table-driven", () => {
-    expect(terminalOutcomeOf("pulse.run.succeeded")).toBe("succeeded");
-    expect(terminalOutcomeOf("pulse.run.failed")).toBe("failed");
-    expect(terminalOutcomeOf("pulse.run.cancelled")).toBe("cancelled");
-    expect(terminalOutcomeOf("pulse.run.blocked")).toBe("blocked");
-    expect(terminalOutcomeOf("pulse.run.started")).toBeNull();
-    expect(terminalOutcomeOf("pulse.run.progress")).toBeNull();
-  });
-  it("subject derives from principal/stack", () => {
-    expect(runOutcomeSubject(cfg)).toBe(`local.${cfg.principal}.${cfg.stack}.pulse.run.>`);
   });
 });
 
@@ -122,7 +50,7 @@ describe("scenario 1+2: field-equals match fires; non-match ignored", () => {
 });
 
 describe("scenario 3: run completion releases lock and re-presents", () => {
-  it("buffered impulse re-presents on synthetic pulse outcome", async () => {
+  it("buffered impulse re-presents on execution.run.finished", async () => {
     const r = await rig([busBp("locked", TASK_SUBJECT, undefined, { guards: { runLock: "buffer" } })]);
     await r.publish(TASK_SUBJECT, { n: 0 });
     const fired = r.repo.historyFor({ blueprintId: "locked" })[0]!;
@@ -131,8 +59,8 @@ describe("scenario 3: run completion releases lock and re-presents", () => {
     await r.publish(TASK_SUBJECT, { n: 1 }); // run in flight → buffered
     expect(r.repo.historyFor({ blueprintId: "locked" })[0]!.outcome).toBe("blocked");
 
-    // synthetic pulse terminal outcome for the stamped correlation
-    await r.publish(runOutcomeSubject(cfg).replace(".>", ".succeeded"), { result: "ok" }, "pulse.run.succeeded", fired.correlationId!);
+    // Runner completion joins through the payload correlation.
+    await r.publishEnvelope(executionRunFinishedSubject(cfg.principal, cfg.stack), runFinishedEnvelope(fired.correlationId!));
     await Bun.sleep(30);
     const latest = r.repo.historyFor({ blueprintId: "locked" })[0]!;
     expect(latest.outcome).toBe("fired");

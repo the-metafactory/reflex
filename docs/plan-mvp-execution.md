@@ -86,7 +86,7 @@ git checkout main && git pull
 - **Project scaffold** (once, during R-101): `bun init` layout, `package.json` scripts (`test`, `test:integration`, `typecheck`), `tsconfig`, myelin git-pin, drizzle config placeholder.
 - **Integration tests** (`bun test:integration`): require local `nats-server -js`; auto-skip with notice when absent. Run before PR for R-101, R-105, R-108, R-110; offline suite is the gate elsewhere.
 - **No scope creep:** anything not in the feature's spec FRs → issue, not code.
-- **Pulse contract (R-108):** run-outcome subjects stubbed behind an interface; do not block on pulse#27.
+- **Execution reporting contract (R-108):** consume myelin's validated `execution.run.finished` envelope on the configured principal/stack subject; release Run Locks using `payload.correlation_id` (Vigil Q23/Q34).
 
 ## What NOT To Do
 

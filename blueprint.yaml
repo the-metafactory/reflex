@@ -68,7 +68,7 @@ features:
     status: done
     iteration: 1
     depends: [R-104]
-    description: "Per-blueprint NATS subject subscriptions; match = subject pattern + flat field-equals conditions on CloudEvents data. No expression language in v0. Also consumes mf.{net}.pulse.run.> outcomes for Run Lock release and Buffered Impulse re-presentation."
+    description: "Per-blueprint NATS subject subscriptions; match = subject pattern + flat field-equals conditions on CloudEvents data. No expression language in v0. Also consumes validated local.{principal}.{stack}.execution.run.finished envelopes for Run Lock release and Buffered Impulse re-presentation, joined by payload.correlation_id."
 
   - id: R-109
     name: "Minimal http impulse source"
