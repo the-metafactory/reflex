@@ -4,11 +4,12 @@ import type { MyelinEnvelope } from "@the-metafactory/myelin";
 import { createReflexBus } from "../../src/bus";
 import { ensureReflexStream } from "../../src/bus/stream";
 import { testConfig } from "../helpers";
-import { NATS_URL, natsReachable, requireWhenExplicit, skipNotice } from "./_guard";
+import { NATS_URL, natsUnavailable, requireWhenExplicit, skipNotice } from "./_guard";
 
-const up = await natsReachable();
-if (!up) skipNotice("roundtrip");
-requireWhenExplicit(up, "roundtrip");
+const unavailable = await natsUnavailable();
+if (unavailable) skipNotice("roundtrip", unavailable);
+requireWhenExplicit(unavailable, "roundtrip");
+const up = unavailable === null;
 
 const cfg = testConfig({ principal: "jc", stack: "itest" });
 const FIRED_SUBJECT = `local.${cfg.principal}.${cfg.stack}.reflex.activation.fired`;
