@@ -42,6 +42,27 @@ REFLEX_CONFIG=~/.config/reflex/personal.yaml reflex status        # CLI against 
 
 The CLI never opens the DB; it reaches its daemon over the bus, addressed by the config's `principal` and `stack`.
 
+### Running the second instance as a service
+
+`reflex service` manages the default service. Add `--instance <name>` to manage a named one next to it:
+
+```sh
+reflex service install --instance personal --config ~/.config/reflex/personal.yaml
+reflex service status --instance personal
+reflex service logs --instance personal --follow
+reflex service uninstall --instance personal
+```
+
+| | Default | `--instance personal` |
+|---|---|---|
+| launchd label | `ai.meta-factory.reflex` | `ai.meta-factory.reflex.personal` |
+| plist | `~/Library/LaunchAgents/ai.meta-factory.reflex.plist` | `~/Library/LaunchAgents/ai.meta-factory.reflex.personal.plist` |
+| systemd unit | `reflex.service` | `reflex-personal.service` |
+| logs (macOS) | `~/.config/reflex/logs/` | `~/.config/reflex/logs/personal/` |
+| `REFLEX_CONFIG` in the unit | not set | the `--config` path, made absolute |
+
+`install --instance` needs `--config` naming an existing file. Instance names match `^[a-z0-9][a-z0-9-]{0,31}$`; any other name fails before a file or `launchctl` is touched. Every verb with `--instance` acts on that service only.
+
 ## Boundaries
 
 | Reflex does | Reflex does not |

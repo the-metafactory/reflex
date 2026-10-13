@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -21,23 +21,94 @@ export interface ServiceResult {
   stderr?: string;
 }
 
-function contexts(): { unit: UnitContext; cmd: CommandContext; unitPath: string; logsDir: string } {
-  const platform = assertSupported(process.platform);
-  const home = homedir();
-  const logsDir = join(home, ".config/reflex/logs");
+export interface ServiceOptions {
+  follow?: boolean;
+  /** Named second service (reflex#37); unset = the default service. */
+  instance?: string;
+  /** Config the named instance's daemon reads (`REFLEX_CONFIG`); install only. */
+  config?: string;
+}
+
+/** The instance name lands in a launchd label, a file path and a systemd
+ * unit name: allowlist, fail closed. */
+export const INSTANCE_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+export interface ServiceContext {
+  unit: UnitContext;
+  cmd: CommandContext;
+  unitPath: string;
+  logsDir: string;
+  /** The commands a message tells the operator to run for this service. */
+  installHint: string;
+  startHint: string;
+}
+
+export interface ServiceHost {
+  platform: string;
+  home: string;
+  uid: number;
+  cwd: string;
+}
+
+const realHost = (): ServiceHost => ({
+  platform: process.platform,
+  home: homedir(),
+  uid: userInfo().uid,
+  cwd: process.cwd(),
+});
+
+/**
+ * Resolve every path, name and env entry a service verb touches. Throws —
+ * before any file write or launchctl/systemctl call — on a bad instance
+ * name, a `--config` without `--instance`, or an install whose config is
+ * missing. No `--instance` yields exactly the pre-#37 default service.
+ */
+export function buildServiceContext(verb: string, options: ServiceOptions = {}, host: ServiceHost = realHost()): ServiceContext {
+  const platform = assertSupported(host.platform);
+  const { instance } = options;
+  if (instance !== undefined && !INSTANCE_NAME.test(instance)) {
+    throw new Error(`invalid --instance "${instance}" — expected ${INSTANCE_NAME.source}`);
+  }
+  if (instance === undefined && options.config !== undefined) {
+    throw new Error("--config needs --instance; the default service reads the default config");
+  }
+  let reflexConfig: string | undefined;
+  if (instance !== undefined && verb === "install") {
+    if (options.config === undefined) {
+      throw new Error(`install --instance ${instance} needs --config <path>`);
+    }
+    reflexConfig = resolve(host.cwd, options.config);
+    if (!existsSync(reflexConfig) || !statSync(reflexConfig).isFile()) {
+      throw new Error(`--config file does not exist: ${reflexConfig}`);
+    }
+  }
+
+  const label = instance === undefined ? SERVICE_LABEL : `${SERVICE_LABEL}.${instance}`;
+  const unitName = instance === undefined ? "reflex" : `reflex-${instance}`;
+  const logsDir =
+    instance === undefined ? join(host.home, ".config/reflex/logs") : join(host.home, ".config/reflex/logs", instance);
   const unit: UnitContext = {
-    label: SERVICE_LABEL,
+    label,
     bunPath: process.execPath,
     daemonScript: resolve(import.meta.dir, "../bin/reflex-daemon.ts"),
     workingDir: resolve(import.meta.dir, "../.."),
-    home,
+    home: host.home,
     logsDir,
+    ...(reflexConfig !== undefined ? { reflexConfig } : {}),
   };
   const unitPath =
     platform === "darwin"
-      ? join(home, "Library/LaunchAgents", `${SERVICE_LABEL}.plist`)
-      : join(home, ".config/systemd/user/reflex.service");
-  return { unit, cmd: { platform, label: SERVICE_LABEL, unitPath, uid: userInfo().uid }, unitPath, logsDir };
+      ? join(host.home, "Library/LaunchAgents", `${label}.plist`)
+      : join(host.home, ".config/systemd/user", `${unitName}.service`);
+  return {
+    unit,
+    cmd: { platform, label, unitPath, unit: unitName, uid: host.uid },
+    unitPath,
+    logsDir,
+    installHint:
+      instance === undefined ? "reflex service install" : `reflex service install --instance ${instance} --config <path>`,
+    startHint: instance === undefined ? "reflex service start" : `reflex service start --instance ${instance}`,
+  };
 }
 
 async function execute(invocations: Invocation[]): Promise<ServiceResult | null> {
@@ -55,14 +126,15 @@ async function execute(invocations: Invocation[]): Promise<ServiceResult | null>
   return null;
 }
 
-export async function serviceCommand(verb: string, options: { follow?: boolean } = {}): Promise<ServiceResult> {
-  let ctx: ReturnType<typeof contexts>;
+export async function serviceCommand(verb: string, options: ServiceOptions = {}): Promise<ServiceResult> {
+  let ctx: ServiceContext;
   try {
-    ctx = contexts();
+    ctx = buildServiceContext(verb, options);
   } catch (error) {
     return { exitCode: 1, stdout: "", stderr: (error as Error).message };
   }
-  const { unit, cmd, unitPath, logsDir } = ctx;
+  const { unit, cmd, unitPath, logsDir, installHint, startHint } = ctx;
+  const { label } = cmd;
 
   switch (verb) {
     case "install": {
@@ -78,18 +150,18 @@ export async function serviceCommand(verb: string, options: { follow?: boolean }
       }
       const failure = await execute(installSequence(cmd));
       if (failure) return failure;
-      return { exitCode: 0, stdout: `installed + started ${SERVICE_LABEL}\nunit: ${unitPath}\nlogs: ${logsDir}` };
+      return { exitCode: 0, stdout: `installed + started ${label}\nunit: ${unitPath}\nlogs: ${logsDir}` };
     }
     case "uninstall": {
       const failure = await execute(uninstallSequence(cmd));
       if (failure) return failure;
       rmSync(unitPath, { force: true });
-      return { exitCode: 0, stdout: `uninstalled ${SERVICE_LABEL}` };
+      return { exitCode: 0, stdout: `uninstalled ${label}` };
     }
     case "start":
     case "stop": {
       if (!existsSync(unitPath)) {
-        return { exitCode: 1, stdout: "", stderr: "not installed — run: reflex service install" };
+        return { exitCode: 1, stdout: "", stderr: `not installed — run: ${installHint}` };
       }
       const failure = await execute(verb === "start" ? startSequence(cmd) : stopSequence(cmd));
       if (failure) return failure;
@@ -97,25 +169,25 @@ export async function serviceCommand(verb: string, options: { follow?: boolean }
     }
     case "status": {
       if (!existsSync(unitPath)) {
-        return { exitCode: 1, stdout: "", stderr: "not installed — run: reflex service install" };
+        return { exitCode: 1, stdout: "", stderr: `not installed — run: ${installHint}` };
       }
       const invocation = statusInvocation(cmd);
       const proc = Bun.spawn(invocation.argv, { stdout: "pipe", stderr: "pipe" });
       const [exitCode, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
       const state = parseStatus(cmd.platform, exitCode, stdout);
       const lines = [
-        `${SERVICE_LABEL}: ${state.running ? `running${state.pid ? ` (pid ${state.pid})` : ""}` : "installed, not running — run: reflex service start"}`,
+        `${label}: ${state.running ? `running${state.pid ? ` (pid ${state.pid})` : ""}` : `installed, not running — run: ${startHint}`}`,
       ];
       // Stale-interpreter check: the unit references the bun resolved at
       // install time; a missing path means the service can't restart.
       const recorded = readFileSync(unitPath, "utf-8").match(/<string>([^<]*bun[^<]*)<\/string>|ExecStart=(\S+)/);
       const recordedBun = recorded?.[1] ?? recorded?.[2];
       if (recordedBun && !existsSync(recordedBun)) {
-        lines.push(`warning: unit references missing bun at ${recordedBun} — run: reflex service install`);
+        lines.push(`warning: unit references missing bun at ${recordedBun} — run: ${installHint}`);
       }
       if (cmd.platform === "linux") {
         // Spec FR-5 promises last log lines on BOTH platforms.
-        const journal = Bun.spawn(["journalctl", "--user", "-u", "reflex", "-n", "5", "--no-pager"], {
+        const journal = Bun.spawn(["journalctl", "--user", "-u", cmd.unit, "-n", "5", "--no-pager"], {
           stdout: "pipe",
           stderr: "ignore",
         });

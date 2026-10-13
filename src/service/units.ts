@@ -22,7 +22,7 @@ function sdQuote(value: string): string {
  */
 export function validateUnitContext(ctx: UnitContext): void {
   for (const [field, value] of Object.entries(ctx)) {
-    if (/[\n\r\0]/.test(value)) {
+    if (value !== undefined && /[\n\r\0]/.test(value)) {
       throw new Error(`unit field ${field} contains control characters — refusing to render`);
     }
   }
@@ -37,6 +37,9 @@ export interface UnitContext {
   workingDir: string;
   home: string;
   logsDir: string;
+  /** Absolute config path → `REFLEX_CONFIG` in the unit env (named
+   * instances, reflex#37). Unset: no entry, the default render. */
+  reflexConfig?: string;
 }
 
 export const SERVICE_LABEL = "ai.meta-factory.reflex";
@@ -74,7 +77,13 @@ export function renderLaunchdPlist(ctx: UnitContext): string {
         <key>HOME</key>
         <string>${xml(ctx.home)}</string>
         <key>PATH</key>
-        <string>${xml(dirname(ctx.bunPath))}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <string>${xml(dirname(ctx.bunPath))}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>${
+          ctx.reflexConfig === undefined
+            ? ""
+            : `
+        <key>REFLEX_CONFIG</key>
+        <string>${xml(ctx.reflexConfig)}</string>`
+        }
     </dict>
 </dict>
 </plist>
@@ -95,7 +104,7 @@ WorkingDirectory=${sdQuote(ctx.workingDir)}
 Restart=always
 RestartSec=2
 Environment=${sdQuote(`HOME=${ctx.home}`)}
-
+${ctx.reflexConfig === undefined ? "" : `Environment=${sdQuote(`REFLEX_CONFIG=${ctx.reflexConfig}`)}\n`}
 [Install]
 WantedBy=default.target
 `;

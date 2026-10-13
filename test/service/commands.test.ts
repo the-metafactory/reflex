@@ -10,8 +10,8 @@ import {
   uninstallSequence,
 } from "../../src/service/commands";
 
-const darwin = { platform: "darwin" as const, label: "ai.meta-factory.reflex", unitPath: "/u/p.plist", uid: 501 };
-const linux = { platform: "linux" as const, label: "ai.meta-factory.reflex", unitPath: "/u/reflex.service", uid: 1000 };
+const darwin = { platform: "darwin" as const, label: "ai.meta-factory.reflex", unitPath: "/u/p.plist", unit: "reflex", uid: 501 };
+const linux = { platform: "linux" as const, label: "ai.meta-factory.reflex", unitPath: "/u/reflex.service", unit: "reflex", uid: 1000 };
 
 describe("platform gate (scenario 5)", () => {
   it("rejects unsupported platforms naming the supported set", () => {

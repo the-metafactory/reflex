@@ -20,6 +20,8 @@ export interface CommandContext {
   platform: ServicePlatform;
   label: string;
   unitPath: string;
+  /** systemd unit name: `reflex`, or `reflex-<instance>`. */
+  unit: string;
   uid: number;
 }
 
@@ -34,7 +36,7 @@ export function installSequence(ctx: CommandContext): Invocation[] {
   }
   return [
     { argv: ["systemctl", "--user", "daemon-reload"] },
-    { argv: ["systemctl", "--user", "enable", "--now", "reflex"] },
+    { argv: ["systemctl", "--user", "enable", "--now", ctx.unit] },
   ];
 }
 
@@ -43,7 +45,7 @@ export function uninstallSequence(ctx: CommandContext): Invocation[] {
     return [{ argv: ["launchctl", "bootout", `gui/${ctx.uid}/${ctx.label}`], allowFail: true }];
   }
   return [
-    { argv: ["systemctl", "--user", "disable", "--now", "reflex"], allowFail: true },
+    { argv: ["systemctl", "--user", "disable", "--now", ctx.unit], allowFail: true },
     { argv: ["systemctl", "--user", "daemon-reload"] },
   ];
 }
@@ -61,7 +63,7 @@ export function startSequence(ctx: CommandContext): Invocation[] {
       { argv: ["launchctl", "kickstart", "-k", `gui/${ctx.uid}/${ctx.label}`] },
     ];
   }
-  return [{ argv: ["systemctl", "--user", "start", "reflex"] }];
+  return [{ argv: ["systemctl", "--user", "start", ctx.unit] }];
 }
 
 export function stopSequence(ctx: CommandContext): Invocation[] {
@@ -70,13 +72,13 @@ export function stopSequence(ctx: CommandContext): Invocation[] {
     // booted-out service succeeds idempotently (sage R-111 cycle-2).
     return [{ argv: ["launchctl", "bootout", `gui/${ctx.uid}/${ctx.label}`], allowFail: true }];
   }
-  return [{ argv: ["systemctl", "--user", "stop", "reflex"] }];
+  return [{ argv: ["systemctl", "--user", "stop", ctx.unit] }];
 }
 
 export function statusInvocation(ctx: CommandContext): Invocation {
   return ctx.platform === "darwin"
     ? { argv: ["launchctl", "print", `gui/${ctx.uid}/${ctx.label}`], allowFail: true }
-    : { argv: ["systemctl", "--user", "is-active", "reflex"], allowFail: true };
+    : { argv: ["systemctl", "--user", "is-active", ctx.unit], allowFail: true };
 }
 
 export function logsInvocation(ctx: CommandContext, logsDir: string, follow: boolean): Invocation {
@@ -84,7 +86,7 @@ export function logsInvocation(ctx: CommandContext, logsDir: string, follow: boo
     const tail = ["tail", ...(follow ? ["-f"] : ["-n", "50"])];
     return { argv: [...tail, `${logsDir}/reflex.log`, `${logsDir}/reflex.error.log`] };
   }
-  return { argv: ["journalctl", "--user", "-u", "reflex", ...(follow ? ["-f"] : ["-n", "50"])] };
+  return { argv: ["journalctl", "--user", "-u", ctx.unit, ...(follow ? ["-f"] : ["-n", "50"])] };
 }
 
 export interface ServiceState {
