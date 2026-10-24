@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { natsTimeoutSchema } from "./nats";
 
 export const sovereigntySchema = z.object({
   classification: z.enum(["local", "federated", "public"]).default("local"),
@@ -34,6 +35,8 @@ export const configSchema = z.object({
        * practice — cortex/sage connect insecure to the local bus). The
        * daemon warns loudly; production keeps the DD-72 creds fail-fast. */
       insecure: z.boolean().default(false),
+      /** JetStream management and publish acknowledgement timeout, in ms. */
+      timeout_ms: natsTimeoutSchema,
     })
     .default({}),
   publish_queue_limit: z.number().int().positive().default(1000),
@@ -54,7 +57,7 @@ export const configSchema = z.object({
 export interface ReflexConfig {
   principal: string;
   stack: string;
-  nats: { url: string; creds: string; insecure: boolean };
+  nats: { url: string; creds: string; insecure: boolean; timeout_ms?: number };
   publishQueueLimit: number;
   sovereignty: z.infer<typeof sovereigntySchema>;
   watchRoots: string[];

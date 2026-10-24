@@ -1,6 +1,7 @@
 import { createEnvelope } from "@the-metafactory/myelin";
 import type { MyelinEnvelope } from "@the-metafactory/myelin";
 import type { EnvelopePublishInput } from "@the-metafactory/myelin";
+import type { ReflexStreamManager } from "../src/bus/stream";
 import type { ReflexConfig } from "../src/config/schema";
 import type { ActivationBlueprint } from "../src/activation/types";
 
@@ -48,4 +49,12 @@ export function makeEnvelope(cfg: ReflexConfig, input: EnvelopePublishInput): My
     extensions: input.extensions,
     sovereignty: { ...cfg.sovereignty, ...(input.sovereignty ?? {}) },
   });
+}
+
+/** Narrow manager fixture shared by stream and daemon startup tests. */
+export function fakeTransport(
+  info: ReflexStreamManager["streams"]["info"],
+  add: ReflexStreamManager["streams"]["add"],
+) {
+  return { getStreamManager: async () => ({ streams: { info, add } }) };
 }

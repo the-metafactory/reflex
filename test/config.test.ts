@@ -9,6 +9,7 @@ const ENV_KEYS = [
   "REFLEX_STACK",
   "REFLEX_NATS_URL",
   "REFLEX_NATS_CREDS",
+  "REFLEX_NATS_TIMEOUT_MS",
   "REFLEX_PUBLISH_QUEUE_LIMIT",
 ] as const;
 
@@ -52,6 +53,7 @@ describe("loadConfig", () => {
     expect(cfg.stack).toBe("default");
     expect(cfg.nats.url).toBe("nats://127.0.0.1:4222");
     expect(cfg.nats.creds).toContain("/.config/nats/creds/reflex.creds");
+    expect(cfg.nats.timeout_ms).toBe(10_000);
     expect(cfg.publishQueueLimit).toBe(1000);
     expect(cfg.sovereignty).toEqual({
       classification: "local",
@@ -68,6 +70,24 @@ describe("loadConfig", () => {
     const cfg = loadConfig({ configPath: "/nonexistent/reflex-config.yaml" });
     expect(cfg.principal).toBe("jc");
     expect(cfg.nats.url).toBe("nats://127.0.0.1:5333");
+  });
+
+  it("loads the JetStream timeout from YAML and allows an env override", () => {
+    const file = writeConfigFile("principal: jc\nnats:\n  timeout_ms: 25000\n");
+    expect(loadConfig({ configPath: file }).nats.timeout_ms).toBe(25_000);
+    process.env.REFLEX_NATS_TIMEOUT_MS = "30000";
+    expect(loadConfig({ configPath: file }).nats.timeout_ms).toBe(30_000);
+  });
+
+  it("rejects invalid JetStream timeouts before startup", () => {
+    for (const value of ["0", "-1", "1.5", "NaN", "Infinity", "2147483648", "slow"]) {
+      const file = writeConfigFile(`principal: jc\nnats:\n  timeout_ms: ${value}\n`);
+      expect(() => loadConfig({ configPath: file })).toThrow(/nats.timeout_ms/);
+    }
+    const file = writeConfigFile("principal: jc\n");
+    for (const value of ["0", "-1", "1.5", "NaN", "Infinity", "2147483648", "slow"]) {
+      expect(() => loadConfig({ configPath: file, env: { REFLEX_NATS_TIMEOUT_MS: value } })).toThrow(/nats.timeout_ms/);
+    }
   });
 
   it("env overrides file", () => {

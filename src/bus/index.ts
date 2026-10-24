@@ -57,7 +57,7 @@ export interface ReflexBus {
   subscribeReplyable(subject: string, handler: ReplyHandler): Promise<Subscription>;
   request(input: EnvelopeRequestInput, subject?: string): Promise<MyelinEnvelope>;
   metrics(): ReflexBusMetrics;
-  /** Underlying transport — NATS-only operations (ensureStream) reach through here. */
+  /** Underlying transport — stream provisioning reaches getStreamManager here. */
   raw: TransportPublisher & TransportSubscriber;
   close(): Promise<void>;
 }

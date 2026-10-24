@@ -53,6 +53,7 @@ const ENV_MAP: Array<{ env: string; path: string[]; parse?: (raw: string) => unk
   { env: "REFLEX_NATS_URL", path: ["nats", "url"] },
   { env: "REFLEX_NATS_CREDS", path: ["nats", "creds"] },
   { env: "REFLEX_NATS_INSECURE", path: ["nats", "insecure"], parse: (raw) => raw === "1" || raw === "true" },
+  { env: "REFLEX_NATS_TIMEOUT_MS", path: ["nats", "timeout_ms"], parse: Number },
   {
     env: "REFLEX_PUBLISH_QUEUE_LIMIT",
     path: ["publish_queue_limit"],

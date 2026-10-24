@@ -3,7 +3,7 @@ import { discoverActivationFiles } from "./activation/sources";
 import { BlueprintStore, loadBlueprintSet } from "./activation/store";
 import { createReflexBus, type ReflexBus } from "./bus";
 import { buildNatsTransport } from "./bus/nats-transport";
-import { ensureReflexStream } from "./bus/stream";
+import { ensureReflexStream, type StreamStartupOptions } from "./bus/stream";
 import type { ReflexConfig } from "./config/schema";
 import { CommandRouter } from "./cmd/router";
 import { CommandHandlers } from "./handlers/commands";
@@ -24,6 +24,8 @@ export interface DaemonOptions {
   bus?: ReflexBus;
   /** Approval expiry sweep cadence. Default 30s. */
   sweepIntervalMs?: number;
+  /** Test clock for bounded stream-startup retries. */
+  streamStartup?: StreamStartupOptions;
 }
 
 /** Opaque public handle (package-root contract): observe + stop. */
@@ -47,7 +49,8 @@ export interface ReflexDaemon extends ReflexDaemonHandle {
  * Composition root: config → storage → blueprint surfaces → bus → stream →
  * pipeline → impulse sources → lifecycle timers. ASSEMBLY is fail-fast:
  * any precondition failure during assembly (migration, duplicate blueprint
- * id, creds, JetStream) throws — with already-opened resources closed —
+ * id, creds, JetStream after bounded timeout retries) throws, with
+ * already-opened resources closed,
  * before the watcher or scheduler start. Failures AFTER start surface
  * through their own paths (watcher last-good-set, bus outage queue).
  */
@@ -72,7 +75,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
   const watcher = new ActivationWatcher(store, sources);
 
   bus = options.bus ?? createReflexBus(cfg, { transport: buildNatsTransport(cfg) });
-  await ensureReflexStream(bus.raw, cfg);
+  await ensureReflexStream(bus.raw, cfg, options.streamStartup);
 
   const pipeline = new Pipeline({ store, repo, bus });
   const schedule = new ScheduleSource(store, pipeline);

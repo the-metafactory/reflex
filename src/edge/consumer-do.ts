@@ -1,5 +1,6 @@
 import type { D1Database, DurableObjectState, KVNamespace } from "@cloudflare/workers-types";
-import { WebSocketTransport } from "@the-metafactory/myelin/edge";
+import { ReflexWebSocketTransport } from "./nats-transport";
+import { natsTimeoutSchema } from "../config/nats";
 import { BlueprintStore } from "../activation/store";
 import { createReflexBus, type ReflexBus } from "../bus";
 import { REFLEX_STREAM_NAME, ensureReflexStream } from "../bus/stream";
@@ -22,6 +23,8 @@ export interface ReflexEdgeEnv {
   REFLEX_STACK?: string;
   /** wss:// URL of the hub's WebSocket listener (DD-70 port 9222). */
   REFLEX_NATS_WS_URL: string;
+  /** JetStream management and publish timeout in ms. Default 10000. */
+  REFLEX_NATS_TIMEOUT_MS?: string;
   /** Secret (REQUIRED): inline .creds file CONTENT (myelin credsContent).
    * There is no insecure fallback on edge — the local daemon's
    * nats.insecure escape hatch is loopback-only by definition, and a
@@ -76,7 +79,12 @@ export class ReflexConsumer {
       stack: this.env.REFLEX_STACK ?? "default",
       // url/creds are carried for interface completeness; the transport is
       // injected below, so buildNatsTransport (and its fs access) never runs.
-      nats: { url: this.env.REFLEX_NATS_WS_URL, creds: "", insecure: false },
+      nats: {
+        url: this.env.REFLEX_NATS_WS_URL, creds: "", insecure: false,
+        timeout_ms: natsTimeoutSchema.parse(
+          this.env.REFLEX_NATS_TIMEOUT_MS === undefined ? undefined : Number(this.env.REFLEX_NATS_TIMEOUT_MS),
+        ),
+      },
       publishQueueLimit: 1000,
       sovereignty: {
         classification: "local",
@@ -117,13 +125,13 @@ export class ReflexConsumer {
         "REFLEX_NATS_CREDS secret is required — provision the inline .creds content (wrangler secret put REFLEX_NATS_CREDS); there is no insecure mode on edge",
       );
     }
-    const transport = new WebSocketTransport({
+    const transport = new ReflexWebSocketTransport({
       servers: this.env.REFLEX_NATS_WS_URL,
       name: `reflex-edge-${cfg.principal}`,
       credsContent: this.env.REFLEX_NATS_CREDS,
       requireAuth: true,
       streamName: REFLEX_STREAM_NAME,
-    });
+    }, cfg.nats.timeout_ms);
     const bus = createReflexBus(cfg, { transport });
 
     // Provision the REFLEX JetStream stream (subjects local.{p}.{s}.reflex.>)
