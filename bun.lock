@@ -5,7 +5,7 @@
     "": {
       "name": "@the-metafactory/reflex",
       "dependencies": {
-        "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#v0.9.0",
+        "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#v0.12.0",
         "commander": "^15.0.0",
         "croner": "^10.0.1",
         "drizzle-orm": "^0.45.2",
@@ -182,7 +182,7 @@
 
     "@speed-highlight/core": ["@speed-highlight/core@1.2.16", "", {}, "sha512-yNm/fYEcnpRjYduLMaddTK9XKYil6xB88+qFg79ZdZhHu1PadfoQmFW7pVTx7FZqMBNcUuThiAhxhENgtAO2/w=="],
 
-    "@the-metafactory/myelin": ["@the-metafactory/myelin@github:the-metafactory/myelin#d4f8e00", { "dependencies": { "@msgpack/msgpack": "^3.1.3", "@nats-io/jetstream": "^3.4.0", "@nats-io/kv": "^3.4.0", "@nats-io/nats-core": "^3.4.0", "@nats-io/transport-node": "^3.4.0", "@noble/ed25519": "^3.1.0", "ajv": "8.20.0", "ajv-formats": "3.0.1" } }, "the-metafactory-myelin-d4f8e00", "sha512-R0n0xtuCkpSgKuI7AezZVzdbPVD/rZZzj/NLLfIXsldiSAOT4kQql99nOmTPeGNl9pvuq/Vdkdr2HMtW5PQYow=="],
+    "@the-metafactory/myelin": ["@the-metafactory/myelin@github:the-metafactory/myelin#b828b92", { "dependencies": { "@msgpack/msgpack": "^3.1.3", "@nats-io/jetstream": "^3.4.0", "@nats-io/kv": "^3.4.0", "@nats-io/nats-core": "^3.4.0", "@nats-io/transport-node": "^3.4.0", "@noble/ed25519": "^3.1.0", "ajv": "8.20.0", "ajv-formats": "3.0.1" } }, "the-metafactory-myelin-b828b92", "sha512-roNDc8SxLtXeH4Fb9/cflINcIufw+PA1wlk8dvOY1WXBfsDF7p//YLfavxgMlc7wEoKwAXsJPaUIc3+HNgRedg=="],
 
     "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
