@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { NATSTransport } from "@the-metafactory/myelin";
+import { ReflexNatsTransport } from "../../src/bus/nats-transport";
 import { ensureReflexStream, REFLEX_STREAM_NAME, reflexStreamSubjects } from "../../src/bus/stream";
 import { testConfig } from "../helpers";
 import { NATS_URL, natsUnavailable, requireWhenExplicit, skipNotice } from "./_guard";
@@ -13,7 +13,7 @@ const cfg = testConfig({ principal: "jc", stack: "itest" });
 
 describe.skipIf(!up)("integration: REFLEX stream ensure", () => {
   it("ensure is idempotent; honest no-op when another stack owns the stream", async () => {
-    const transport = new NATSTransport({ servers: NATS_URL, name: "reflex-itest-stream" });
+    const transport = new ReflexNatsTransport({ servers: NATS_URL, name: "reflex-itest-stream" });
     const { jetstreamManager } = await import("@nats-io/jetstream");
     const { connect } = await import("@nats-io/transport-node");
     const nc = await connect({ servers: NATS_URL });

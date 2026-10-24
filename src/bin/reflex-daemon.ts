@@ -4,7 +4,8 @@ import { startDaemon } from "../daemon";
 
 /**
  * Daemon entry: load config (file + REFLEX_* env), start, stop cleanly on
- * SIGINT/SIGTERM. Any startup precondition failure exits non-zero with the
+ * SIGINT/SIGTERM. Stream startup retries transient timeouts first; any
+ * remaining startup precondition failure exits non-zero with the
  * actionable error (fail-fast policy, R-101).
  */
 async function main(): Promise<void> {

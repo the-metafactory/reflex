@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { NATSTransport, validateEnvelope } from "@the-metafactory/myelin";
+import { validateEnvelope } from "@the-metafactory/myelin";
+import { ReflexNatsTransport } from "../../src/bus/nats-transport";
 import type { MyelinEnvelope } from "@the-metafactory/myelin";
 import { createReflexBus } from "../../src/bus";
 import { ensureReflexStream } from "../../src/bus/stream";
@@ -16,7 +17,7 @@ const FIRED_SUBJECT = `local.${cfg.principal}.${cfg.stack}.reflex.activation.fir
 
 describe.skipIf(!up)("integration: publish round-trip", () => {
   it("fired envelope reaches a durable consumer and validates", async () => {
-    const transport = new NATSTransport({ servers: NATS_URL, name: "reflex-itest", streamName: "REFLEX" });
+    const transport = new ReflexNatsTransport({ servers: NATS_URL, name: "reflex-itest", streamName: "REFLEX" });
     const bus = createReflexBus(cfg, { transport });
     await ensureReflexStream(transport, cfg);
 

@@ -1,5 +1,6 @@
 import type { D1Database, DurableObjectState, KVNamespace } from "@cloudflare/workers-types";
 import { WebSocketTransport } from "@the-metafactory/myelin/edge";
+import { jetstreamManager } from "@nats-io/jetstream";
 import { BlueprintStore } from "../activation/store";
 import { createReflexBus, type ReflexBus } from "../bus";
 import { REFLEX_STREAM_NAME, ensureReflexStream } from "../bus/stream";
@@ -11,6 +12,13 @@ import { EdgeHeartbeat, ALARM_PERIOD_MS } from "./heartbeat";
 import { D1Repository } from "../store/d1-repository";
 import { EdgeHttpSource } from "./http";
 import { loadBlueprintsFromKV } from "./kv-blueprints";
+
+/** Expose safe stream management without importing the TCP adapter on edge. */
+class ReflexWebSocketTransport extends WebSocketTransport {
+  async getStreamManager() {
+    return jetstreamManager(await this.ensureNc(), { timeout: 10_000 });
+  }
+}
 
 /** Bindings the reflex edge worker expects (wrangler.toml). */
 export interface ReflexEdgeEnv {
@@ -117,7 +125,7 @@ export class ReflexConsumer {
         "REFLEX_NATS_CREDS secret is required — provision the inline .creds content (wrangler secret put REFLEX_NATS_CREDS); there is no insecure mode on edge",
       );
     }
-    const transport = new WebSocketTransport({
+    const transport = new ReflexWebSocketTransport({
       servers: this.env.REFLEX_NATS_WS_URL,
       name: `reflex-edge-${cfg.principal}`,
       credsContent: this.env.REFLEX_NATS_CREDS,

@@ -34,6 +34,8 @@ export const configSchema = z.object({
        * practice — cortex/sage connect insecure to the local bus). The
        * daemon warns loudly; production keeps the DD-72 creds fail-fast. */
       insecure: z.boolean().default(false),
+      /** JetStream management and publish acknowledgement timeout, in ms. */
+      timeout_ms: z.number().int().positive().max(2_147_483_647).default(10_000),
     })
     .default({}),
   publish_queue_limit: z.number().int().positive().default(1000),
@@ -54,7 +56,7 @@ export const configSchema = z.object({
 export interface ReflexConfig {
   principal: string;
   stack: string;
-  nats: { url: string; creds: string; insecure: boolean };
+  nats: { url: string; creds: string; insecure: boolean; timeout_ms?: number };
   publishQueueLimit: number;
   sovereignty: z.infer<typeof sovereigntySchema>;
   watchRoots: string[];
