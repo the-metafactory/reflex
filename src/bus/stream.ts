@@ -1,5 +1,4 @@
 import type { ReflexConfig } from "../config/schema";
-import { TimeoutError } from "@nats-io/nats-core";
 import { JetStreamApiError, JetStreamApiCodes } from "@nats-io/jetstream";
 import type { JetStreamManager } from "@nats-io/jetstream";
 
@@ -21,6 +20,28 @@ export type ReflexStreamManager = { streams: Pick<JetStreamManager["streams"], "
 export interface StreamStartupOptions {
   /** Test clock; production uses real, referenced timers. */
   sleep?: (ms: number) => Promise<void>;
+}
+
+async function provisionOnce(
+  manager: ReflexStreamManager,
+  cfg: Pick<ReflexConfig, "principal" | "stack">,
+): Promise<void> {
+  try {
+    await manager.streams.info(REFLEX_STREAM_NAME);
+    return;
+  } catch (error) {
+    if (!(error instanceof JetStreamApiError) || error.code !== JetStreamApiCodes.StreamNotFound) throw error;
+  }
+  await manager.streams.add({
+    name: REFLEX_STREAM_NAME,
+    subjects: reflexStreamSubjects(cfg),
+    retention: "limits",
+    storage: "file",
+    discard: "old",
+    max_bytes: 512 * 1024 * 1024,
+    max_age: 7 * 24 * 60 * 60 * 1e9,
+    num_replicas: 1,
+  });
 }
 
 /**
@@ -53,24 +74,12 @@ export async function ensureReflexStream(
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const manager = await provisionable.getStreamManager();
-      try {
-        await manager.streams.info(REFLEX_STREAM_NAME);
-      } catch (error) {
-        if (!(error instanceof JetStreamApiError) || error.code !== JetStreamApiCodes.StreamNotFound) throw error;
-        await manager.streams.add({
-          name: REFLEX_STREAM_NAME,
-          subjects: reflexStreamSubjects(cfg),
-          retention: "limits",
-          storage: "file",
-          discard: "old",
-          max_bytes: 512 * 1024 * 1024,
-          max_age: 7 * 24 * 60 * 60 * 1e9,
-          num_replicas: 1,
-        });
-      }
+      await provisionOnce(manager, cfg);
       return;
     } catch (error) {
-      const timeout = error instanceof TimeoutError;
+      // nats-core 3.4 identifies request timeouts by this name, with no
+      // numeric code. Class identity is not stable across package copies.
+      const timeout = error instanceof Error && error.name === "TimeoutError";
       if (!timeout || attempt === attempts) {
         throw new Error(
           `Failed to ensure JetStream stream ${REFLEX_STREAM_NAME}` +

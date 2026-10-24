@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { natsTimeoutSchema } from "./nats";
 
 export const sovereigntySchema = z.object({
   classification: z.enum(["local", "federated", "public"]).default("local"),
@@ -35,7 +36,7 @@ export const configSchema = z.object({
        * daemon warns loudly; production keeps the DD-72 creds fail-fast. */
       insecure: z.boolean().default(false),
       /** JetStream management and publish acknowledgement timeout, in ms. */
-      timeout_ms: z.number().int().positive().max(2_147_483_647).default(10_000),
+      timeout_ms: natsTimeoutSchema,
     })
     .default({}),
   publish_queue_limit: z.number().int().positive().default(1000),

@@ -21,7 +21,7 @@ The daemon (`reflex-daemon`) and the CLI (`reflex`) read a YAML config file, ove
 |---|---|---|
 | `REFLEX_CONFIG` (env) | `~/.config/reflex/config.yaml` | Config file to read. Empty counts as unset. If it names a file that does not exist, the daemon and CLI exit non-zero naming the path; they never fall back to env-only config. |
 | `state_dir` (config) | `$XDG_STATE_HOME/reflex`, else `~/.local/state/reflex` | Directory holding the daemon's `reflex.db`. A leading `~/` expands. |
-| `nats.timeout_ms` / `REFLEX_NATS_TIMEOUT_MS` | `10000` | Positive integer milliseconds for daemon stream management and JetStream publish acknowledgements. |
+| `nats.timeout_ms` / `REFLEX_NATS_TIMEOUT_MS` | `10000` | Positive integer milliseconds for stream management and JetStream publish acknowledgements (daemon and edge). |
 
 Daemon stream startup retries timeouts up to ten attempts, waiting 1, 2, 4, 8,
 16, then 30 seconds between attempts. Only an explicit stream-not-found response

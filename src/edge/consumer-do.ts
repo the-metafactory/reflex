@@ -1,6 +1,6 @@
 import type { D1Database, DurableObjectState, KVNamespace } from "@cloudflare/workers-types";
-import { WebSocketTransport } from "@the-metafactory/myelin/edge";
-import { jetstreamManager } from "@nats-io/jetstream";
+import { ReflexWebSocketTransport } from "./nats-transport";
+import { natsTimeoutSchema } from "../config/nats";
 import { BlueprintStore } from "../activation/store";
 import { createReflexBus, type ReflexBus } from "../bus";
 import { REFLEX_STREAM_NAME, ensureReflexStream } from "../bus/stream";
@@ -13,13 +13,6 @@ import { D1Repository } from "../store/d1-repository";
 import { EdgeHttpSource } from "./http";
 import { loadBlueprintsFromKV } from "./kv-blueprints";
 
-/** Expose safe stream management without importing the TCP adapter on edge. */
-class ReflexWebSocketTransport extends WebSocketTransport {
-  async getStreamManager() {
-    return jetstreamManager(await this.ensureNc(), { timeout: 10_000 });
-  }
-}
-
 /** Bindings the reflex edge worker expects (wrangler.toml). */
 export interface ReflexEdgeEnv {
   REFLEX_DB: D1Database;
@@ -30,6 +23,8 @@ export interface ReflexEdgeEnv {
   REFLEX_STACK?: string;
   /** wss:// URL of the hub's WebSocket listener (DD-70 port 9222). */
   REFLEX_NATS_WS_URL: string;
+  /** JetStream management and publish timeout in ms. Default 10000. */
+  REFLEX_NATS_TIMEOUT_MS?: string;
   /** Secret (REQUIRED): inline .creds file CONTENT (myelin credsContent).
    * There is no insecure fallback on edge — the local daemon's
    * nats.insecure escape hatch is loopback-only by definition, and a
@@ -84,7 +79,12 @@ export class ReflexConsumer {
       stack: this.env.REFLEX_STACK ?? "default",
       // url/creds are carried for interface completeness; the transport is
       // injected below, so buildNatsTransport (and its fs access) never runs.
-      nats: { url: this.env.REFLEX_NATS_WS_URL, creds: "", insecure: false },
+      nats: {
+        url: this.env.REFLEX_NATS_WS_URL, creds: "", insecure: false,
+        timeout_ms: natsTimeoutSchema.parse(
+          this.env.REFLEX_NATS_TIMEOUT_MS === undefined ? undefined : Number(this.env.REFLEX_NATS_TIMEOUT_MS),
+        ),
+      },
       publishQueueLimit: 1000,
       sovereignty: {
         classification: "local",
@@ -131,7 +131,7 @@ export class ReflexConsumer {
       credsContent: this.env.REFLEX_NATS_CREDS,
       requireAuth: true,
       streamName: REFLEX_STREAM_NAME,
-    });
+    }, cfg.nats.timeout_ms);
     const bus = createReflexBus(cfg, { transport });
 
     // Provision the REFLEX JetStream stream (subjects local.{p}.{s}.reflex.>)

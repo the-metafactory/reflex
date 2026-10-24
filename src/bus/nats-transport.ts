@@ -1,43 +1,34 @@
 import { existsSync } from "node:fs";
 import { NATSTransport } from "@the-metafactory/myelin";
 import type { MyelinEnvelope, NATSTransportOptions } from "@the-metafactory/myelin";
-import { jetstream, jetstreamManager } from "@nats-io/jetstream";
-import type { JetStreamClient, JetStreamManager } from "@nats-io/jetstream";
+import type { JetStreamManager } from "@nats-io/jetstream";
+import { ReflexJetStream } from "./jetstream";
 import { REFLEX_STREAM_NAME } from "./stream";
 import type { ReflexConfig } from "../config/schema";
 
-/** Local override until Myelin exposes JetStream timeout options. Core-NATS
+/** Compatibility boundary for pinned Myelin v0.12.0. Remove when a pinned
+ * release accepts JetStream API/publish timeouts and exposes stream management.
+ * The shared policy and transport contract tests cover both adapters. Core-NATS
  * request/reply and subscriptions retain Myelin's behavior. */
 export class ReflexNatsTransport extends NATSTransport {
-  private reflexClient: JetStreamClient | undefined;
-  private reflexManager: Promise<JetStreamManager> | undefined;
+  private readonly reflexJetStream: ReflexJetStream;
 
-  constructor(options: NATSTransportOptions, private readonly timeoutMs = 10_000) {
+  constructor(options: NATSTransportOptions, timeoutMs?: number) {
     super(options);
+    this.reflexJetStream = new ReflexJetStream(timeoutMs);
   }
 
   async getStreamManager(): Promise<JetStreamManager> {
-    if (!this.reflexManager) {
-      this.reflexManager = this.ensureNc()
-        .then((nc) => jetstreamManager(nc, { timeout: this.timeoutMs }))
-        .catch((error) => {
-          this.reflexManager = undefined; // a timed-out initialization must be retryable
-          throw error;
-        });
-    }
-    return this.reflexManager;
+    return this.reflexJetStream.getManager(await this.ensureNc());
   }
 
   override async publish(subject: string, envelope: MyelinEnvelope): Promise<void> {
     if (subject.startsWith("_INBOX.")) return super.publish(subject, envelope);
-    const nc = await this.ensureNc();
-    this.reflexClient ??= jetstream(nc, { timeout: this.timeoutMs });
-    await this.reflexClient.publish(subject, this.codec.encode(envelope), { timeout: this.timeoutMs });
+    await this.reflexJetStream.publish(await this.ensureNc(), subject, this.codec.encode(envelope));
   }
 
   override async close(): Promise<void> {
-    this.reflexClient = undefined;
-    this.reflexManager = undefined;
+    this.reflexJetStream.reset();
     await super.close();
   }
 }

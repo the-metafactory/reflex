@@ -1,9 +1,14 @@
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, mock } from "bun:test";
 import { TimeoutError, PermissionViolationError, AuthorizationError, NoRespondersError } from "@nats-io/nats-core";
 import { JetStreamApiError } from "@nats-io/jetstream";
 import type { StreamInfo, StreamConfig } from "@nats-io/jetstream";
 import { ensureReflexStream, reflexStreamSubjects, REFLEX_STREAM_NAME } from "../src/bus/stream";
-import { testConfig } from "./helpers";
+import { testConfig, fakeTransport } from "./helpers";
 
 describe("reflex stream config", () => {
   it("derives the wildcard from principal + stack, never hand-built elsewhere", () => {
@@ -28,11 +33,36 @@ describe("ensureReflexStream", () => {
     });
     const add = mock(async () => existing);
     const sleep = mock(async (_ms: number) => {});
-    await ensureReflexStream({ getStreamManager: async () => ({ streams: { info, add } }) }, testConfig(), { sleep });
+    await ensureReflexStream(fakeTransport(info, add), testConfig(), { sleep });
     expect(info).toHaveBeenCalledTimes(10);
     expect(add).not.toHaveBeenCalled();
     expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000, 30000]);
     expect(existing.config.subjects).toEqual(["local.other.stack.reflex.>"]);
+  });
+
+  it("retries a timeout from a second nats-core package copy", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "reflex-nats-copy-"));
+    try {
+      // Load the installed NATS implementation with an independent class identity.
+      const copy = join(dir, "errors.cjs");
+      copyFileSync(join(dirname(fileURLToPath(import.meta.resolve("@nats-io/nats-core"))), "errors.js"), copy);
+      const OtherTimeout = createRequire(import.meta.url)(copy).TimeoutError;
+      const timeout = new OtherTimeout();
+      expect(timeout).not.toBeInstanceOf(TimeoutError);
+      let calls = 0;
+      const info = mock(async () => {
+        if (++calls === 1) throw timeout;
+        return existing;
+      });
+      const add = mock(async () => existing);
+      const sleep = mock(async (_ms: number) => {});
+      await ensureReflexStream(fakeTransport(info, add), testConfig(), { sleep });
+      expect(info).toHaveBeenCalledTimes(2);
+      expect(sleep.mock.calls).toEqual([[1000]]);
+      expect(add).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("creates only after definite not-found, preserving the stream configuration", async () => {
@@ -42,7 +72,7 @@ describe("ensureReflexStream", () => {
       throw missing();
     });
     const add = mock(async (_config: Partial<StreamConfig>) => existing);
-    await ensureReflexStream({ getStreamManager: async () => ({ streams: { info, add } }) }, testConfig(), { sleep: async () => {} });
+    await ensureReflexStream(fakeTransport(info, add), testConfig(), { sleep: async () => {} });
     expect(info).toHaveBeenCalledTimes(2);
     expect(add).toHaveBeenCalledTimes(1);
     expect(add.mock.calls[0]).toEqual([{
@@ -59,7 +89,7 @@ describe("ensureReflexStream", () => {
       return existing;
     });
     const add = mock(async (): Promise<StreamInfo> => { throw new TimeoutError(); });
-    await ensureReflexStream({ getStreamManager: async () => ({ streams: { info, add } }) }, testConfig(), { sleep: async () => {} });
+    await ensureReflexStream(fakeTransport(info, add), testConfig(), { sleep: async () => {} });
     expect(info).toHaveBeenCalledTimes(2);
     expect(add).toHaveBeenCalledTimes(1);
   });
@@ -83,7 +113,7 @@ describe("ensureReflexStream", () => {
     const info = mock(async (): Promise<StreamInfo> => { throw timeout; });
     const add = mock(async () => existing);
     const sleep = mock(async (_ms: number) => {});
-    const error = await ensureReflexStream({ getStreamManager: async () => ({ streams: { info, add } }) }, testConfig(), { sleep }).catch((e) => e);
+    const error = await ensureReflexStream(fakeTransport(info, add), testConfig(), { sleep }).catch((e) => e);
     expect(error.message).toContain("REFLEX after 10 attempts (timeout retries exhausted)");
     expect(error.cause).toBe(timeout);
     expect(info).toHaveBeenCalledTimes(10);
@@ -100,7 +130,7 @@ describe("ensureReflexStream", () => {
       const info = mock(async (): Promise<StreamInfo> => { throw error; });
       const add = mock(async () => existing);
       const sleep = mock(async (_ms: number) => {});
-      await expect(ensureReflexStream({ getStreamManager: async () => ({ streams: { info, add } }) }, testConfig(), { sleep })).rejects.toThrow();
+      await expect(ensureReflexStream(fakeTransport(info, add), testConfig(), { sleep })).rejects.toThrow();
       expect(info).toHaveBeenCalledTimes(1);
       expect(add).not.toHaveBeenCalled();
       expect(sleep).not.toHaveBeenCalled();
@@ -112,7 +142,7 @@ describe("ensureReflexStream", () => {
     const info = mock(async (): Promise<StreamInfo> => { throw missing(); });
     const add = mock(async (): Promise<StreamInfo> => { throw conflict; });
     const sleep = mock(async (_ms: number) => {});
-    await expect(ensureReflexStream({ getStreamManager: async () => ({ streams: { info, add } }) }, testConfig(), { sleep })).rejects.toThrow(/different configuration/);
+    await expect(ensureReflexStream(fakeTransport(info, add), testConfig(), { sleep })).rejects.toThrow(/different configuration/);
     expect(info).toHaveBeenCalledTimes(1);
     expect(add).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();

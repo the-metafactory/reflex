@@ -7,7 +7,7 @@ import { TimeoutError } from "@nats-io/nats-core";
 import type { StreamInfo } from "@nats-io/jetstream";
 import { createReflexBus } from "../src/bus";
 import { startDaemon } from "../src/daemon";
-import { testConfig } from "./helpers";
+import { testConfig, fakeTransport } from "./helpers";
 
 function docFor(id: string, cron = "0 7 * * *"): string {
   return `schema: metafactory/activation/v1\nactivations:\n  - id: ${id}\n    target: "@jc/${id}"\n    when:\n      schedule: "${cron}"\n`;
@@ -60,9 +60,7 @@ describe("startDaemon", () => {
       return {} as StreamInfo;
     });
     const add = mock(async () => ({} as StreamInfo));
-    const transport = Object.assign(createTransport({ type: "memory" }), {
-      getStreamManager: async () => ({ streams: { info, add } }),
-    });
+    const transport = Object.assign(createTransport({ type: "memory" }), fakeTransport(info, add));
     const bus = createReflexBus(cfg, { transport });
     const delays: number[] = [];
     const daemon = await startDaemon(cfg, {
@@ -89,9 +87,7 @@ describe("startDaemon", () => {
     const cfg = testConfig({ activationsDir: dir });
     const info = mock(async (): Promise<StreamInfo> => { throw new TimeoutError(); });
     const add = mock(async () => ({} as StreamInfo));
-    const transport = Object.assign(createTransport({ type: "memory" }), {
-      getStreamManager: async () => ({ streams: { info, add } }),
-    });
+    const transport = Object.assign(createTransport({ type: "memory" }), fakeTransport(info, add));
     const bus = createReflexBus(cfg, { transport });
     try {
       await expect(startDaemon(cfg, {
