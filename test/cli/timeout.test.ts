@@ -15,20 +15,13 @@ const reply = makeEnvelope(cfg, {
   payload: { v: 1, ok: true, data: { outcome: "fired" } },
 });
 
-/** Fake request transport with real reply/deadline timers, no daemon or NATS. */
+/** Deterministic transport: advance directly to the earlier reply or deadline. */
 function delayedBus(delayMs = 0) {
   const transport = createTransport({ type: "memory" });
   const request = mock<typeof transport.request>(async (_subject, _envelope, options) => {
-    return new Promise((resolve, reject) => {
-      const responseTimer = setTimeout(() => {
-        clearTimeout(timeoutTimer);
-        resolve(reply);
-      }, delayMs);
-      const timeoutTimer = setTimeout(() => {
-        clearTimeout(responseTimer);
-        reject(new Error(`Request timed out after ${options?.timeoutMs}ms`));
-      }, options?.timeoutMs);
-    });
+    const timeoutMs = options?.timeoutMs ?? 3_000;
+    if (delayMs >= timeoutMs) throw new Error(`Request timed out after ${timeoutMs}ms on ${_subject}`);
+    return reply;
   });
   transport.request = request;
   return { bus: createReflexBus(cfg, { transport }), request };
@@ -85,7 +78,7 @@ describe("CLI request timeouts", () => {
       await direct.bus.close();
       await cli.bus.close();
     }
-  }, 10_000);
+  });
 
   it("times out beyond the new 15 s default with an uncertain-outcome warning", async () => {
     const { bus, request } = delayedBus(15_100);
@@ -96,9 +89,10 @@ describe("CLI request timeouts", () => {
     expect(result.stderr).toContain("daemon may still act");
     expect(result.stderr).toContain("reflex history");
     expect(result.stderr).toContain("reflex service logs");
+    expect(result.stderr).toContain("reflex-daemon is running");
     expect(result.stderr).not.toContain("daemon not reachable");
     expect(request).toHaveBeenCalledTimes(1);
-  }, 25_000);
+  });
 
   it("honors shorter explicit and environment deadlines", async () => {
     for (const args of [[], ["--timeout", "40"]]) {
@@ -111,26 +105,38 @@ describe("CLI request timeouts", () => {
   });
 
   it("keeps connection errors distinct from requests awaiting a reply", async () => {
-    const { bus } = delayedBus();
-    bus.request = async () => { throw new Error("connection refused"); };
-    try {
-      await expect(requestCommand(bus, cfg, "status", {}, actor)).rejects.toBeInstanceOf(TransportUnreachable);
+    for (const error of [
+      new Error("connection refused"),
+      new Error("connection timed out"),
+      new Error("authentication timeout"),
+      new Error("TIMEOUT"),
+      Object.assign(new Error("timeout"), { name: "TimeoutError" }),
+    ]) {
+      const { bus } = delayedBus();
+      bus.request = async () => { throw error; };
+      const failure = await requestCommand(bus, cfg, "status", {}, actor).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(TransportUnreachable);
+      expect((failure as TransportUnreachable).kind).toBe("unreachable");
       const result = await runCommand(["status"], { cfg, makeBus: () => bus });
       expect(result.exitCode).toBe(EXIT_TRANSPORT);
+      expect(result.stderr).toContain("daemon not reachable");
       expect(result.stderr).toContain("check NATS");
       expect(result.stderr).not.toContain("request was sent");
-    } finally {
-      await bus.close();
     }
   });
 
-  it("also explains raw NATS timeout errors as uncertain outcomes", async () => {
-    for (const message of ["timeout", "TIMEOUT"]) {
+  it("exposes request deadlines as typed uncertain outcomes", async () => {
+    for (const message of ["Request timed out after 15000ms", "Request timed out after 15000ms on test.subject"]) {
       const { bus } = delayedBus();
       bus.request = async () => { throw new Error(message); };
+      const failure = await requestCommand(bus, cfg, "fire", { blueprintId: "demo" }, actor).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(TransportUnreachable);
+      expect((failure as TransportUnreachable).kind).toBe("timeout");
       const result = await runCommand(["fire", "demo"], { cfg, makeBus: () => bus });
       expect(result.exitCode).toBe(EXIT_TRANSPORT);
+      expect(result.stderr).toContain("daemon reply timed out");
       expect(result.stderr).toContain("daemon may still act");
+      expect(result.stderr).toContain("reflex-daemon is running");
     }
   });
 
