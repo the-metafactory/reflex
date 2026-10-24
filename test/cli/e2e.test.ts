@@ -142,14 +142,18 @@ describe("reflex CLI end-to-end (InMemory)", () => {
 });
 
 describe("daemon unreachable", () => {
-  it("times out with exit 2 and a daemon hint", async () => {
+  it("times out with exit 2 and suggests checking both daemon availability and outcome", async () => {
     const lonely = createTransport({ type: "memory" }); // nobody listening
     const r = await runCommand(["pending", "--timeout", "300"], {
       cfg,
       makeBus: (c) => createReflexBus(c, { transport: lonely }),
     });
     expect(r.exitCode).toBe(EXIT_TRANSPORT);
-    expect(r.stderr).toContain("reflex-daemon running");
+    expect(r.stderr).toContain("request was sent");
+    expect(r.stderr).toContain("daemon may still act");
+    expect(r.stderr).toContain("reflex-daemon is running");
+    expect(r.stderr).toContain("reflex history");
+    expect(r.stderr).toContain("reflex service logs");
   }, 10_000);
 });
 

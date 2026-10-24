@@ -1,4 +1,4 @@
-import { Command as Commander } from "commander";
+import { Command as Commander, CommanderError, InvalidArgumentError, Option } from "commander";
 import { userInfo } from "node:os";
 import { validatePaths } from "../activation/validate-cli";
 import { createReflexBus, type ReflexBus } from "../bus";
@@ -8,7 +8,7 @@ import type { Command } from "../cmd/protocol";
 import { loadConfig } from "../config/load";
 import type { ReflexConfig } from "../config/schema";
 import { serviceCommand } from "../service/run";
-import { TransportUnreachable, requestCommand } from "./client";
+import { DEFAULT_REQUEST_TIMEOUT_MS, TransportUnreachable, requestCommand } from "./client";
 import { EXIT_DOMAIN, EXIT_OK, EXIT_TRANSPORT, renderResponse, table, type Rendered } from "./render";
 
 export interface CliIo {
@@ -21,17 +21,30 @@ function operatorActor(): ReflexActor {
   return { type: "operator", id: userInfo().username };
 }
 
+function requestTimeoutOption(): Option {
+  return new Option("--timeout <ms>", "request timeout in milliseconds (flag overrides environment)")
+    .default(DEFAULT_REQUEST_TIMEOUT_MS)
+    .env("REFLEX_REQUEST_TIMEOUT_MS")
+    .argParser((raw) => {
+      const timeout = Number(raw);
+      if (!Number.isSafeInteger(timeout) || timeout <= 0) {
+        throw new InvalidArgumentError("expected a positive integer in milliseconds");
+      }
+      return timeout;
+    });
+}
+
 /** Run one CLI invocation; returns the rendered result (bin prints + exits). */
 export async function runCommand(argv: string[], io: CliIo = {}): Promise<Rendered> {
   let result: Rendered = { exitCode: EXIT_OK, stdout: "" };
   const program = new Commander("reflex").exitOverride();
-  program.configureOutput({ writeErr: () => {}, writeOut: () => {} });
+  program.configureOutput({ writeErr: () => {}, writeOut: (text) => { result.stdout += text; } });
 
   const remote = (command: Command, human: (data: unknown) => string, argsOf: (cmdArgs: Record<string, unknown>) => Record<string, unknown>) => {
     return async (...cliArgs: unknown[]) => {
       const opts = (cliArgs.at(-2) ?? {}) as Record<string, unknown>;
       const json = Boolean(opts.json);
-      const timeout = Number(opts.timeout ?? 3000);
+      const timeout = Number(opts.timeout ?? DEFAULT_REQUEST_TIMEOUT_MS);
       const cfg = io.cfg ?? loadConfig();
       const bus = (io.makeBus ?? ((c: ReflexConfig) => createReflexBus(c, { transport: buildNatsTransport(c) })))(cfg);
       try {
@@ -58,7 +71,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     .command("status")
     .description("Daemon health: blueprints, Matched Decisions awaiting approval, bus metrics.\nExample: reflex status --json")
     .option("--json", "raw JSON output")
-    .option("--timeout <ms>", "request timeout", "3000")
+    .addOption(requestTimeoutOption())
     .action(
       remote(
         "status",
@@ -89,7 +102,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     .option("--kind <kind>", "filter by impulse kind")
     .option("--target <target>", "filter by target")
     .option("--json", "raw JSON output")
-    .option("--timeout <ms>", "request timeout", "3000")
+    .addOption(requestTimeoutOption())
     .action(
       remote(
         "list",
@@ -106,7 +119,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     .description("Produce a manual Impulse through the full pipeline (no guard bypass).\nExample: reflex fire f-testing --input '{\"suite\":\"smoke\"}'")
     .option("--input <json>", "Activation Payload merged into the impulse", "{}")
     .option("--json", "raw JSON output")
-    .option("--timeout <ms>", "request timeout", "3000")
+    .addOption(requestTimeoutOption())
     .action(async (blueprintId: string, opts: Record<string, unknown>, cmd: unknown) => {
       let input: Record<string, unknown>;
       try {
@@ -133,7 +146,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
       .command(`${name} <decision-id>`)
       .description(`${name === "approve" ? "Approve" : "Deny"} a Matched Decision awaiting approval.\nExample: reflex ${name} <decision-id>`)
       .option("--json", "raw JSON output")
-      .option("--timeout <ms>", "request timeout", "3000")
+      .addOption(requestTimeoutOption())
       .action(async (decisionId: string, opts: Record<string, unknown>, cmd: unknown) => {
         await remote(
           command as Command,
@@ -150,7 +163,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     .command("pending")
     .description("Matched Decisions awaiting approval.\nExample: reflex pending")
     .option("--json", "raw JSON output")
-    .option("--timeout <ms>", "request timeout", "3000")
+    .addOption(requestTimeoutOption())
     .action(
       remote(
         "matched",
@@ -168,7 +181,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     .option("--blueprint <id>", "filter by blueprint")
     .option("--limit <n>", "max rows (server caps at 200)", "50")
     .option("--json", "raw JSON output")
-    .option("--timeout <ms>", "request timeout", "3000")
+    .addOption(requestTimeoutOption())
     .action(
       remote(
         "history",
@@ -185,7 +198,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     .description("Dry Run: predicted outcome, zero side effects.\nExample: reflex test pr-stats-daily")
     .option("--impulse <json>", "synthetic impulse payload", "{}")
     .option("--json", "raw JSON output")
-    .option("--timeout <ms>", "request timeout", "3000")
+    .addOption(requestTimeoutOption())
     .action(async (blueprintId: string, opts: Record<string, unknown>, cmd: unknown) => {
       // Local parse FIRST (same as --input): malformed JSON is a domain
       // error (exit 1), never a fake transport failure (sage R-107 finding).
@@ -244,6 +257,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
   try {
     await program.parseAsync(argv, { from: "user" });
   } catch (error) {
+    if (error instanceof CommanderError && error.exitCode === 0) return result;
     // commander usage errors (unknown command/flag, missing arg)
     return { exitCode: EXIT_DOMAIN, stdout: "", stderr: (error as Error).message };
   }
