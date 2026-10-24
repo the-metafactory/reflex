@@ -4,13 +4,19 @@ import type { ReflexActor } from "../bus/envelopes";
 import type { ReflexConfig } from "../config/schema";
 import { CMD_REQUEST_TYPE, PROTOCOL_VERSION, cmdSubject, type CmdResponse, type Command } from "../cmd/protocol";
 
+export const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+
+function isRequestTimeout(message: string): boolean {
+  return /timed out|timeout/i.test(message);
+}
+
 export class TransportUnreachable extends Error {
   constructor(
     readonly subject: string,
     readonly hint: string,
     cause: string,
   ) {
-    super(`daemon not reachable on ${subject} (${cause}) — ${hint}`);
+    super(`${isRequestTimeout(cause) ? "daemon reply timed out" : "daemon not reachable"} on ${subject} (${cause}) — ${hint}`);
     this.name = "TransportUnreachable";
   }
 }
@@ -26,7 +32,7 @@ export async function requestCommand(
   command: Command,
   args: Record<string, unknown>,
   actor: ReflexActor,
-  timeoutMs = 3000,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
 ): Promise<CmdResponse> {
   const subject = cmdSubject(cfg, command);
   try {
@@ -42,8 +48,8 @@ export async function requestCommand(
     return reply.payload as unknown as CmdResponse;
   } catch (error) {
     const message = (error as Error).message;
-    const hint = message.includes("timed out")
-      ? `is reflex-daemon running? (NATS at ${cfg.nats.url})`
+    const hint = isRequestTimeout(message)
+      ? "the request was sent and the daemon may still act on it; check `reflex history` or the daemon log (`reflex service logs`) before retrying"
       : `check NATS at ${cfg.nats.url} and credentials ${cfg.nats.creds}`;
     throw new TransportUnreachable(subject, hint, message);
   }
