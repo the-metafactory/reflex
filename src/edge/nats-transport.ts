@@ -16,12 +16,10 @@ export class ReflexWebSocketTransport extends WebSocketTransport {
   }
 
   override async publish(subject: string, envelope: MyelinEnvelope): Promise<void> {
-    if (subject.startsWith("_INBOX.")) return super.publish(subject, envelope);
     await this.reflexJetStream.publish(await this.ensureNc(), subject, this.codec.encode(envelope));
   }
 
-  override async close(): Promise<void> {
-    this.reflexJetStream.reset();
-    await super.close();
+  override close(): Promise<void> {
+    return this.reflexJetStream.close(() => super.close());
   }
 }

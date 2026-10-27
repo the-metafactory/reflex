@@ -74,6 +74,13 @@ export class ReflexConsumer {
   ) {}
 
   private cfg(): ReflexConfig {
+    const timeout = this.env.REFLEX_NATS_TIMEOUT_MS;
+    const parsedTimeout = natsTimeoutSchema.safeParse(
+      timeout === undefined || timeout === "" ? undefined : Number(timeout),
+    );
+    if (!parsedTimeout.success) {
+      throw new Error(`Invalid REFLEX_NATS_TIMEOUT_MS: ${timeout}`, { cause: parsedTimeout.error });
+    }
     return {
       principal: this.env.REFLEX_PRINCIPAL,
       stack: this.env.REFLEX_STACK ?? "default",
@@ -81,9 +88,7 @@ export class ReflexConsumer {
       // injected below, so buildNatsTransport (and its fs access) never runs.
       nats: {
         url: this.env.REFLEX_NATS_WS_URL, creds: "", insecure: false,
-        timeout_ms: natsTimeoutSchema.parse(
-          this.env.REFLEX_NATS_TIMEOUT_MS === undefined ? undefined : Number(this.env.REFLEX_NATS_TIMEOUT_MS),
-        ),
+        timeout_ms: parsedTimeout.data,
       },
       publishQueueLimit: 1000,
       sovereignty: {
