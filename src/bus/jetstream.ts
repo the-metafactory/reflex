@@ -19,12 +19,17 @@ export class ReflexJetStream {
   }
 
   async publish(nc: NatsConnection, subject: string, payload: Uint8Array): Promise<void> {
+    if (subject.startsWith("_INBOX.")) {
+      nc.publish(subject, payload);
+      return;
+    }
     this.client ??= jetstream(nc, { timeout: this.timeoutMs });
     await this.client.publish(subject, payload, { timeout: this.timeoutMs });
   }
 
-  reset(): void {
+  async close(closeTransport: () => Promise<void>): Promise<void> {
     this.client = undefined;
     this.manager = undefined;
+    await closeTransport();
   }
 }

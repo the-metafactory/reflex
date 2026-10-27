@@ -11,6 +11,7 @@ import { testConfig } from "./helpers";
 function rig(Adapter: typeof ReflexNatsTransport | typeof ReflexWebSocketTransport, timeoutMs?: number, managerTimeouts = 0) {
   const requests: Array<{ subject: string; timeout: number | undefined }> = [];
   const inboxes: string[] = [];
+  const inboxPayloads: Uint8Array[] = [];
   let connections = 0;
   const nc = {
     options: {},
@@ -22,7 +23,10 @@ function rig(Adapter: typeof ReflexNatsTransport | typeof ReflexWebSocketTranspo
         : { stream: "REFLEX", seq: 1 };
       return { data: new TextEncoder().encode(JSON.stringify(response)) };
     },
-    publish: (subject: string) => { inboxes.push(subject); },
+    publish: (subject: string, payload: Uint8Array) => {
+      inboxes.push(subject);
+      inboxPayloads.push(payload);
+    },
     drain: async () => {},
   } as unknown as NatsConnection;
   const transport = new Adapter({ servers: "ws://localhost:4222", streamName: "REFLEX" }, timeoutMs);
@@ -32,7 +36,7 @@ function rig(Adapter: typeof ReflexNatsTransport | typeof ReflexWebSocketTranspo
       return nc;
     },
   });
-  return { transport, requests, inboxes, connections: () => connections };
+  return { transport, nc, requests, inboxes, inboxPayloads, connections: () => connections };
 }
 
 const envelope = () => createEnvelope({ source: "jc.default.reflex", type: "reflex.activation.fired", payload: {}, sovereignty: testConfig().sovereignty });
@@ -73,10 +77,12 @@ for (const Adapter of [ReflexNatsTransport, ReflexWebSocketTransport]) {
     });
 
     it("reinitializes clients after close and preserves the inbox bypass", async () => {
-      const { transport, requests, inboxes, connections } = rig(Adapter);
-      await transport.publish("_INBOX.reply", envelope());
+      const { transport, requests, inboxes, inboxPayloads, connections } = rig(Adapter);
+      const reply = envelope();
+      await transport.publish("_INBOX.reply", reply);
       expect(requests).toHaveLength(0);
       expect(inboxes).toEqual(["_INBOX.reply"]);
+      expect(JSON.parse(new TextDecoder().decode(inboxPayloads[0]))).toEqual(reply);
       await transport.getStreamManager();
       await transport.publish("local.jc.default.reflex.activation.fired", envelope());
       await transport.close();
@@ -86,6 +92,23 @@ for (const Adapter of [ReflexNatsTransport, ReflexWebSocketTransport]) {
         expect(connections()).toBe(2);
         expect(requests).toHaveLength(4);
       } finally {
+        await transport.close();
+      }
+    });
+
+    it("clears the cached manager before a failing connection drain", async () => {
+      const { transport, nc, requests } = rig(Adapter);
+      const firstManager = await transport.getStreamManager();
+      await transport.publish("local.jc.default.reflex.activation.fired", envelope());
+      const drain = nc.drain;
+      nc.drain = async () => { throw new Error("drain failed"); };
+      try {
+        await expect(transport.close()).rejects.toThrow("drain failed");
+        expect(await transport.getStreamManager()).not.toBe(firstManager);
+        await transport.publish("local.jc.default.reflex.activation.fired", envelope());
+        expect(requests).toHaveLength(4);
+      } finally {
+        nc.drain = drain;
         await transport.close();
       }
     });
