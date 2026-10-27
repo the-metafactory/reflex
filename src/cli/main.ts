@@ -21,17 +21,19 @@ function operatorActor(): ReflexActor {
   return { type: "operator", id: userInfo().username };
 }
 
+function resolveRequestTimeout(raw: unknown = DEFAULT_REQUEST_TIMEOUT_MS): number {
+  const timeout = Number(raw);
+  if (!Number.isSafeInteger(timeout) || timeout <= 0) {
+    throw new InvalidArgumentError("expected a positive integer in milliseconds");
+  }
+  return timeout;
+}
+
 function requestTimeoutOption(): Option {
   return new Option("--timeout <ms>", "request timeout in milliseconds (flag overrides environment)")
-    .default(DEFAULT_REQUEST_TIMEOUT_MS)
+    .default(resolveRequestTimeout())
     .env("REFLEX_REQUEST_TIMEOUT_MS")
-    .argParser((raw) => {
-      const timeout = Number(raw);
-      if (!Number.isSafeInteger(timeout) || timeout <= 0) {
-        throw new InvalidArgumentError("expected a positive integer in milliseconds");
-      }
-      return timeout;
-    });
+    .argParser(resolveRequestTimeout);
 }
 
 /** Run one CLI invocation; returns the rendered result (bin prints + exits). */
@@ -44,7 +46,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     return async (...cliArgs: unknown[]) => {
       const opts = (cliArgs.at(-2) ?? {}) as Record<string, unknown>;
       const json = Boolean(opts.json);
-      const timeout = opts.timeout as number;
+      const timeout = resolveRequestTimeout(opts.timeout);
       const cfg = io.cfg ?? loadConfig();
       const bus = (io.makeBus ?? ((c: ReflexConfig) => createReflexBus(c, { transport: buildNatsTransport(c) })))(cfg);
       try {
