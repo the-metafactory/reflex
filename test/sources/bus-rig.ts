@@ -1,6 +1,5 @@
 import { createTransport, createEnvelope } from "@the-metafactory/myelin";
-import { createExecutionRunFinished } from "@the-metafactory/myelin/edge";
-import type { MyelinEnvelope, RunOutcome } from "@the-metafactory/myelin/edge";
+import type { MyelinEnvelope } from "@the-metafactory/myelin/edge";
 import { BlueprintStore } from "../../src/activation/store";
 import type { ActivationBlueprint } from "../../src/activation/types";
 import { createReflexBus } from "../../src/bus";
@@ -63,23 +62,4 @@ export async function rig(blueprints: ActivationBlueprint[], nowRef = { now: "20
       close();
     },
   };
-}
-
-export function runFinishedEnvelope(correlationId: string, outcome: RunOutcome = "succeeded", producer = "cortex") {
-  const event = createExecutionRunFinished({
-    source: `${cfg.principal}.${cfg.stack}.${producer}`,
-    principal: cfg.principal,
-    stack: cfg.stack,
-    sovereignty: cfg.sovereignty,
-    payload: {
-      run_id: crypto.randomUUID(),
-      producer,
-      ran: { kind: "flow", ref: "@jc/locked" },
-      outcome,
-      started_at: "2026-06-10T12:00:00.000Z",
-      ended_at: "2026-06-10T12:01:00.000Z",
-      correlation_id: correlationId,
-    },
-  });
-  return createEnvelope({ ...event.input, sovereignty: cfg.sovereignty });
 }

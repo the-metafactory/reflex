@@ -1,10 +1,30 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { executionRunFinishedSubject, type MyelinEnvelope } from "@the-metafactory/myelin/edge";
 import { readRunFinished, runOutcomeSubject } from "../../src/sources/run-outcome";
-import { busBp, cfg, rig, runFinishedEnvelope, TASK_SUBJECT } from "./bus-rig";
+import { busBp, cfg, rig, TASK_SUBJECT } from "./bus-rig";
+import { runFinishedEnvelope } from "../helpers";
 
 const SUBJECT = executionRunFinishedSubject(cfg.principal, cfg.stack);
 const OUTCOMES = ["succeeded", "failed", "cancelled", "blocked"] as const;
+
+/** A rig with one locked blueprint: the first impulse fired and holds the lock, the second hit it. */
+async function lockedRig(runLock: "buffer" | "skip") {
+  const r = await rig([busBp("locked", TASK_SUBJECT, undefined, { guards: { runLock } })]);
+  try {
+    await r.publish(TASK_SUBJECT, { n: 0 });
+    const first = r.repo.historyFor({ blueprintId: "locked" })[0]!;
+    await r.publish(TASK_SUBJECT, { n: 1 });
+    return {
+      r,
+      first,
+      before: r.repo.getGuardState("locked"),
+      history: r.repo.historyFor({ blueprintId: "locked" }),
+    };
+  } catch (error) {
+    await r.close();
+    throw error;
+  }
+}
 
 describe("execution.run.finished contract", () => {
   it("derives the subject from the configured principal and stack", () => {
@@ -19,12 +39,9 @@ describe("execution.run.finished contract", () => {
 
   for (const outcome of OUTCOMES) {
     it(`${outcome}: releases the buffer and re-presents exactly once`, async () => {
-      const r = await rig([busBp("locked", TASK_SUBJECT, undefined, { guards: { runLock: "buffer" } })]);
+      const { r, first, history: blockedHistory } = await lockedRig("buffer");
       try {
-        await r.publish(TASK_SUBJECT, { n: 0 });
-        const first = r.repo.historyFor({ blueprintId: "locked" })[0]!;
-        await r.publish(TASK_SUBJECT, { n: 1 });
-        const blocked = r.repo.historyFor({ blueprintId: "locked" })[0]!;
+        const blocked = blockedHistory[0]!;
         expect(blocked.outcome).toBe("blocked");
         expect(blocked.guardBlockReason).toBe("run-lock-buffered");
         expect(r.repo.getGuardState("locked")?.bufferedImpulse).toBeTruthy();
@@ -50,11 +67,8 @@ describe("execution.run.finished contract", () => {
     });
 
     it(`${outcome}: releases a skip lock so the next impulse fires`, async () => {
-      const r = await rig([busBp("locked", TASK_SUBJECT, undefined, { guards: { runLock: "skip" } })]);
+      const { r, first } = await lockedRig("skip");
       try {
-        await r.publish(TASK_SUBJECT, { n: 0 });
-        const first = r.repo.historyFor({ blueprintId: "locked" })[0]!;
-        await r.publish(TASK_SUBJECT, { n: 1 });
         expect(r.repo.historyFor({ blueprintId: "locked" })[0]!.guardBlockReason).toBe("run-lock");
         await r.publishEnvelope(SUBJECT, runFinishedEnvelope(first.correlationId!, outcome));
         expect(r.repo.getGuardState("locked")?.runLockHolder).toBeNull();
@@ -67,15 +81,11 @@ describe("execution.run.finished contract", () => {
   }
 
   it("unrelated ranger, soma and cortex runs preserve locks and buffers without warning", async () => {
-    const r = await rig([busBp("locked", TASK_SUBJECT, undefined, { guards: { runLock: "buffer" } })]);
+    const { r, before, history } = await lockedRig("buffer");
     const warn = spyOn(console, "warn").mockImplementation(() => {});
     const error = spyOn(console, "error").mockImplementation(() => {});
     const debug = spyOn(console, "debug").mockImplementation(() => {});
     try {
-      await r.publish(TASK_SUBJECT, { n: 0 });
-      await r.publish(TASK_SUBJECT, { n: 1 });
-      const before = r.repo.getGuardState("locked");
-      const history = r.repo.historyFor({ blueprintId: "locked" });
       for (const producer of ["ranger", "soma", "cortex"]) {
         await r.publishEnvelope(SUBJECT, runFinishedEnvelope("t1", "succeeded", producer));
         await r.publishEnvelope(SUBJECT, runFinishedEnvelope(crypto.randomUUID(), "succeeded", producer));
@@ -102,15 +112,10 @@ describe("execution.run.finished contract", () => {
   ];
   for (const { label, field, mutate } of malformed) {
     it(`rejects ${label}, warns once and keeps consuming`, async () => {
-      const r = await rig([busBp("locked", TASK_SUBJECT, undefined, { guards: { runLock: "buffer" } })]);
+      const { r, first, before, history } = await lockedRig("buffer");
       const warn = spyOn(console, "warn").mockImplementation(() => {});
       const error = spyOn(console, "error").mockImplementation(() => {});
       try {
-        await r.publish(TASK_SUBJECT, { n: 0 });
-        const first = r.repo.historyFor({ blueprintId: "locked" })[0]!;
-        await r.publish(TASK_SUBJECT, { n: 1 });
-        const before = r.repo.getGuardState("locked");
-        const history = r.repo.historyFor({ blueprintId: "locked" });
         const invalid = runFinishedEnvelope(first.correlationId!);
         mutate(invalid);
         const validation = readRunFinished(invalid);
@@ -139,13 +144,8 @@ describe("execution.run.finished contract", () => {
   }
 
   it("legacy pulse outcomes and other stacks cannot release the lock", async () => {
-    const r = await rig([busBp("locked", TASK_SUBJECT, undefined, { guards: { runLock: "buffer" } })]);
+    const { r, first, before, history } = await lockedRig("buffer");
     try {
-      await r.publish(TASK_SUBJECT, { n: 0 });
-      const first = r.repo.historyFor({ blueprintId: "locked" })[0]!;
-      await r.publish(TASK_SUBJECT, { n: 1 });
-      const before = r.repo.getGuardState("locked");
-      const history = r.repo.historyFor({ blueprintId: "locked" });
       await r.publish(`local.${cfg.principal}.${cfg.stack}.pulse.run.succeeded`, {}, "pulse.run.succeeded", first.correlationId!);
       await r.publishEnvelope(executionRunFinishedSubject(cfg.principal, "other"), runFinishedEnvelope(first.correlationId!));
       expect(r.repo.getGuardState("locked")).toEqual(before);

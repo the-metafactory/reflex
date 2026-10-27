@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { executionRunFinishedSubject } from "@the-metafactory/myelin/edge";
 import { matches } from "../../src/sources/bus";
-import { busBp, cfg, rig, runFinishedEnvelope, TASK_SUBJECT } from "./bus-rig";
+import { busBp, cfg, rig, TASK_SUBJECT } from "./bus-rig";
+import { runFinishedEnvelope } from "../helpers";
 
 describe("matcher", () => {
   it("property: match iff every where-entry strict-equals", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { executionRunFinishedSubject, type MyelinEnvelope } from "@the-metafactory/myelin/edge";
-import { busBp, cfg, rig, runFinishedEnvelope, TASK_SUBJECT } from "./sources/bus-rig";
+import { busBp, cfg, rig, TASK_SUBJECT } from "./sources/bus-rig";
+import { runFinishedEnvelope } from "./helpers";
 
 const SUBJECT = executionRunFinishedSubject(cfg.principal, cfg.stack);
 
