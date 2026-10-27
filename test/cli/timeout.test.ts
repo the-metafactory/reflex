@@ -113,30 +113,38 @@ describe("CLI request timeouts", () => {
       Object.assign(new Error("timeout"), { name: "TimeoutError" }),
     ]) {
       const { bus } = delayedBus();
-      bus.request = async () => { throw error; };
-      const failure = await requestCommand(bus, cfg, "status", {}, actor).catch((error: unknown) => error);
-      expect(failure).toBeInstanceOf(TransportUnreachable);
-      expect((failure as TransportUnreachable).kind).toBe("unreachable");
-      const result = await runCommand(["status"], { cfg, makeBus: () => bus });
-      expect(result.exitCode).toBe(EXIT_TRANSPORT);
-      expect(result.stderr).toContain("daemon not reachable");
-      expect(result.stderr).toContain("check NATS");
-      expect(result.stderr).not.toContain("request was sent");
+      try {
+        bus.request = async () => { throw error; };
+        const failure = await requestCommand(bus, cfg, "status", {}, actor).catch((caught: unknown) => caught);
+        expect(failure).toBeInstanceOf(TransportUnreachable);
+        expect((failure as TransportUnreachable).kind).toBe("unreachable");
+        const result = await runCommand(["status"], { cfg, makeBus: () => bus });
+        expect(result.exitCode).toBe(EXIT_TRANSPORT);
+        expect(result.stderr).toContain("daemon not reachable");
+        expect(result.stderr).toContain("check NATS");
+        expect(result.stderr).not.toContain("request was sent");
+      } finally {
+        await bus.close();
+      }
     }
   });
 
   it("exposes request deadlines as typed uncertain outcomes", async () => {
     for (const message of ["Request timed out after 15000ms", "Request timed out after 15000ms on test.subject"]) {
       const { bus } = delayedBus();
-      bus.request = async () => { throw new Error(message); };
-      const failure = await requestCommand(bus, cfg, "fire", { blueprintId: "demo" }, actor).catch((error: unknown) => error);
-      expect(failure).toBeInstanceOf(TransportUnreachable);
-      expect((failure as TransportUnreachable).kind).toBe("timeout");
-      const result = await runCommand(["fire", "demo"], { cfg, makeBus: () => bus });
-      expect(result.exitCode).toBe(EXIT_TRANSPORT);
-      expect(result.stderr).toContain("daemon reply timed out");
-      expect(result.stderr).toContain("daemon may still act");
-      expect(result.stderr).toContain("reflex-daemon is running");
+      try {
+        bus.request = async () => { throw new Error(message); };
+        const failure = await requestCommand(bus, cfg, "fire", { blueprintId: "demo" }, actor).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(TransportUnreachable);
+        expect((failure as TransportUnreachable).kind).toBe("timeout");
+        const result = await runCommand(["fire", "demo"], { cfg, makeBus: () => bus });
+        expect(result.exitCode).toBe(EXIT_TRANSPORT);
+        expect(result.stderr).toContain("daemon reply timed out");
+        expect(result.stderr).toContain("daemon may still act");
+        expect(result.stderr).toContain("reflex-daemon is running");
+      } finally {
+        await bus.close();
+      }
     }
   });
 

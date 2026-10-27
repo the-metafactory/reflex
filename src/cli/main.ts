@@ -44,7 +44,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     return async (...cliArgs: unknown[]) => {
       const opts = (cliArgs.at(-2) ?? {}) as Record<string, unknown>;
       const json = Boolean(opts.json);
-      const timeout = Number(opts.timeout ?? DEFAULT_REQUEST_TIMEOUT_MS);
+      const timeout = opts.timeout as number;
       const cfg = io.cfg ?? loadConfig();
       const bus = (io.makeBus ?? ((c: ReflexConfig) => createReflexBus(c, { transport: buildNatsTransport(c) })))(cfg);
       try {
