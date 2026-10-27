@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createTransport, createEnvelope } from "@the-metafactory/myelin";
-import { createExecutionRunFinished } from "@the-metafactory/myelin/edge";
+import { executionRunFinishedSubject } from "@the-metafactory/myelin/edge";
 import { discoverActivationFiles } from "../src/activation/sources";
 import { BlueprintStore, loadBlueprintSet } from "../src/activation/store";
 import { validatePaths } from "../src/activation/validate-cli";
@@ -11,7 +11,7 @@ import { Pipeline } from "../src/pipeline/evaluate";
 import { BusSource } from "../src/sources/bus";
 import { openDb } from "../src/store/db";
 import { Repository } from "../src/store/repository";
-import { testConfig } from "./helpers";
+import { runFinishedEnvelope, testConfig } from "./helpers";
 
 const EXAMPLES = join(import.meta.dir, "../examples");
 const suiteStart = performance.now();
@@ -120,22 +120,12 @@ describe("end-to-end flows (fake clock + InMemory)", () => {
 
     // Runner's execution.run.finished → buffered impulse re-presents and fires.
     nowRef.now = "2026-06-11T10:30:00.000Z";
-    const finished = createExecutionRunFinished({
-      source: `${cfg.principal}.${cfg.stack}.cortex`,
-      principal: cfg.principal,
-      stack: cfg.stack,
-      sovereignty: cfg.sovereignty,
-      payload: {
-        run_id: crypto.randomUUID(),
-        producer: "cortex",
-        ran: { kind: "flow", ref: "@jc/pilot-scan" },
-        outcome: "succeeded",
-        started_at: "2026-06-11T10:00:00.000Z",
-        ended_at: nowRef.now,
-        correlation_id: resolved.correlationId,
-      },
+    const finished = runFinishedEnvelope(resolved.correlationId, "succeeded", "cortex", {
+      ref: "@jc/pilot-scan",
+      started_at: "2026-06-11T10:00:00.000Z",
+      ended_at: nowRef.now,
     });
-    await bus.raw.publish(finished.subject, createEnvelope({ ...finished.input, sovereignty: cfg.sovereignty }));
+    await bus.raw.publish(executionRunFinishedSubject(cfg.principal, cfg.stack), finished);
     await Bun.sleep(30);
     expect(repo.historyFor({ blueprintId: "pilot-scan" })[0]!.outcome).toBe("fired");
     await source.stop();

@@ -1,6 +1,8 @@
 import { createEnvelope } from "@the-metafactory/myelin";
 import type { MyelinEnvelope } from "@the-metafactory/myelin";
 import type { EnvelopePublishInput } from "@the-metafactory/myelin";
+import { createExecutionRunFinished } from "@the-metafactory/myelin/edge";
+import type { RunOutcome } from "@the-metafactory/myelin/edge";
 import type { ReflexStreamManager } from "../src/bus/stream";
 import type { ReflexConfig } from "../src/config/schema";
 import type { ActivationBlueprint } from "../src/activation/types";
@@ -57,4 +59,36 @@ export function fakeTransport(
   add: ReflexStreamManager["streams"]["add"],
 ) {
   return { getStreamManager: async () => ({ streams: { info, add } }) };
+}
+
+export interface RunFinishedOverrides {
+  ref?: string;
+  started_at?: string;
+  ended_at?: string;
+}
+
+/** A valid execution.run.finished envelope for the default test config; the overrides vary the run's ref and timestamps. */
+export function runFinishedEnvelope(
+  correlationId: string,
+  outcome: RunOutcome = "succeeded",
+  producer = "cortex",
+  overrides: RunFinishedOverrides = {},
+): MyelinEnvelope {
+  const cfg = testConfig();
+  const finished = createExecutionRunFinished({
+    source: `${cfg.principal}.${cfg.stack}.${producer}`,
+    principal: cfg.principal,
+    stack: cfg.stack,
+    sovereignty: cfg.sovereignty,
+    payload: {
+      run_id: crypto.randomUUID(),
+      producer,
+      ran: { kind: "flow", ref: overrides.ref ?? "@jc/locked" },
+      outcome,
+      started_at: overrides.started_at ?? "2026-06-10T12:00:00.000Z",
+      ended_at: overrides.ended_at ?? "2026-06-10T12:01:00.000Z",
+      correlation_id: correlationId,
+    },
+  });
+  return createEnvelope({ ...finished.input, sovereignty: cfg.sovereignty });
 }
