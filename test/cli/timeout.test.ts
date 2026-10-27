@@ -16,15 +16,25 @@ const reply = makeEnvelope(cfg, {
 });
 
 /** Deterministic transport: advance directly to the earlier reply or deadline. */
-function delayedBus(delayMs = 0) {
+function delayedBus(delayMs = 0, response = reply) {
   const transport = createTransport({ type: "memory" });
   const request = mock<typeof transport.request>(async (_subject, _envelope, options) => {
     const timeoutMs = options?.timeoutMs ?? 3_000;
     if (delayMs >= timeoutMs) throw new Error(`Request timed out after ${timeoutMs}ms on ${_subject}`);
-    return reply;
+    return response;
   });
   transport.request = request;
   return { bus: createReflexBus(cfg, { transport }), request };
+}
+
+async function withThrowingBus(error: unknown, check: (bus: ReflexBus) => Promise<void>): Promise<void> {
+  const { bus } = delayedBus();
+  try {
+    bus.request = async () => { throw error; };
+    await check(bus);
+  } finally {
+    await bus.close();
+  }
 }
 
 const remoteCommands = [
@@ -42,6 +52,31 @@ afterEach(() => {
 });
 
 describe("CLI request timeouts", () => {
+  it("bare status sends a numeric 15 s default and renders the reply", async () => {
+    const statusReply = makeEnvelope(cfg, {
+      source: "reflex",
+      type: CMD_REPLY_TYPE,
+      payload: {
+        v: 1,
+        ok: true,
+        data: {
+          version: "0.1.0",
+          instanceId: "test-instance",
+          blueprints: { total: 0, byKind: {} },
+          waitingApprovals: 0,
+          bus: { published: 0, received: 0, queued: 0, dropped: 0 },
+          nextTicks: [],
+        },
+      },
+    });
+    const { bus, request } = delayedBus(0, statusReply);
+    const result = await runCommand(["status"], { cfg, makeBus: () => bus });
+    expect(result.exitCode).toBe(EXIT_OK);
+    expect(result.stdout).toContain("reflex-daemon 0.1.0");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]![2]?.timeoutMs).toBe(15_000);
+  });
+
   for (const argv of remoteCommands) {
     it(`${argv[0]} uses 15 s by default, environment next, explicit flag first`, async () => {
       for (const [env, flag, expected] of [
@@ -112,9 +147,7 @@ describe("CLI request timeouts", () => {
       new Error("TIMEOUT"),
       Object.assign(new Error("timeout"), { name: "TimeoutError" }),
     ]) {
-      const { bus } = delayedBus();
-      try {
-        bus.request = async () => { throw error; };
+      await withThrowingBus(error, async (bus) => {
         const failure = await requestCommand(bus, cfg, "status", {}, actor).catch((caught: unknown) => caught);
         expect(failure).toBeInstanceOf(TransportUnreachable);
         expect((failure as TransportUnreachable).kind).toBe("unreachable");
@@ -123,18 +156,14 @@ describe("CLI request timeouts", () => {
         expect(result.stderr).toContain("daemon not reachable");
         expect(result.stderr).toContain("check NATS");
         expect(result.stderr).not.toContain("request was sent");
-      } finally {
-        await bus.close();
-      }
+      });
     }
   });
 
   it("exposes request deadlines as typed uncertain outcomes", async () => {
     for (const message of ["Request timed out after 15000ms", "Request timed out after 15000ms on test.subject"]) {
-      const { bus } = delayedBus();
-      try {
-        bus.request = async () => { throw new Error(message); };
-        const failure = await requestCommand(bus, cfg, "fire", { blueprintId: "demo" }, actor).catch((error: unknown) => error);
+      await withThrowingBus(new Error(message), async (bus) => {
+        const failure = await requestCommand(bus, cfg, "fire", { blueprintId: "demo" }, actor).catch((caught: unknown) => caught);
         expect(failure).toBeInstanceOf(TransportUnreachable);
         expect((failure as TransportUnreachable).kind).toBe("timeout");
         const result = await runCommand(["fire", "demo"], { cfg, makeBus: () => bus });
@@ -142,9 +171,7 @@ describe("CLI request timeouts", () => {
         expect(result.stderr).toContain("daemon reply timed out");
         expect(result.stderr).toContain("daemon may still act");
         expect(result.stderr).toContain("reflex-daemon is running");
-      } finally {
-        await bus.close();
-      }
+      });
     }
   });
 
