@@ -46,7 +46,7 @@ describe("routine CLI through daemon command protocol", () => {
     expect(list.exitCode).toBe(0);
     expect(JSON.parse(list.stdout)).toMatchObject([{ id: "cli-routine", policy: "approval" }]);
     const routines = await run(["routine", "list", "--json"]);
-    expect(JSON.parse(routines.stdout)).toMatchObject([{ id: "cli-routine", policy: "approve", lastDecision: null }]);
+    expect(JSON.parse(routines.stdout)).toMatchObject([{ id: "cli-routine", policy: "approval", lastDecision: null }]);
     const test = await run(["test", "cli-routine", "--json"]);
     expect(JSON.parse(test.stdout)).toMatchObject({ wouldOutcome: "matched" });
     expect((await run(["routine", "set-policy", "cli-routine", "auto", "--json"])).exitCode).toBe(0);

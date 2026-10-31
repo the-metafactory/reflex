@@ -96,7 +96,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
       }
       await remote("routine-add", (data) => JSON.stringify(data), () => ({
         id: opts.id, schedule: opts.schedule, timezone: opts.timezone, target: opts.target,
-        payload, policy: opts.policy, ...(flow === undefined ? {} : { flow }), ...(opts.servesGoal ? { servesGoal: opts.servesGoal } : {}),
+        payload, policy: opts.policy === "approve" ? "approval" : opts.policy, ...(flow === undefined ? {} : { flow }), ...(opts.servesGoal ? { servesGoal: opts.servesGoal } : {}),
       }))(opts, cmd);
     });
   routine.command("remove <id>").option("--json").addOption(requestTimeoutOption())
@@ -105,7 +105,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     });
   routine.command("set-policy <id> <policy>").option("--json").addOption(requestTimeoutOption())
     .action(async (id: string, policy: string, opts: Record<string, unknown>, cmd: unknown) => {
-      await remote("routine-set-policy", (data) => JSON.stringify(data), () => ({ id, policy }))(id, policy, opts, cmd);
+      await remote("routine-set-policy", (data) => JSON.stringify(data), () => ({ id, policy: policy === "approve" ? "approval" : policy }))(id, policy, opts, cmd);
     });
   routine.command("list").option("--json").addOption(requestTimeoutOption())
     .action(remote("routine-list", (data) => table(data as Array<Record<string, unknown>>, ["id", "schedule", "policy", "target", "lastDecision"]), () => ({})));

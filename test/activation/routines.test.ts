@@ -58,10 +58,10 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
       const loaded = await loadBlueprintSet(await discoverActivationFiles(f.sources));
       expect(loaded.map((b) => b.id)).toEqual([input.id]);
       const listing = await f.routines.execute("routine-list", {}, actor);
-      expect(listing).toMatchObject({ ok: true, data: [{ id: input.id, policy: "approve", target: input.target, lastDecision: null }] });
+      expect(listing).toMatchObject({ ok: true, data: [{ id: input.id, policy: "approval", target: input.target, lastDecision: null }] });
       expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "auto" }, actor)).ok).toBe(true);
       await until(() => f.store.get(input.id)?.policy === "auto");
-      expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "approve" }, actor)).ok).toBe(true);
+      expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "approval" }, actor)).ok).toBe(true);
       await until(() => f.store.get(input.id)?.policy === "approval");
       expect((await f.routines.execute("routine-remove", { id: input.id }, actor)).ok).toBe(true);
       await until(() => f.store.get(input.id) === undefined);
@@ -120,7 +120,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
       expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "auto" }, actor)).ok).toBe(true);
       const { deriveIdempotencyKey } = await import("../../src/pipeline/impulse");
       await f.repo.putIdempotencyKey(input.id, await deriveIdempotencyKey(input.id, {}), new Date(Date.now() + 60000).toISOString());
-      expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "approve" }, actor)).ok).toBe(true);
+      expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "approval" }, actor)).ok).toBe(true);
       expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "auto" }, actor)).ok).toBe(false);
       expect(await readFile(join(f.routinesDir, `${input.id}.yaml`), "utf8")).toContain("policy: approval");
     } finally { await f.cleanup(); }
@@ -133,7 +133,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
       expect((await f.routines.execute("routine-add", { ...input, policy: "auto" }, actor)).ok).toBe(true);
       down = true;
       expect((await f.routines.execute("routine-add", { ...input, id: "other" }, actor)).ok).toBe(false);
-      expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "approve" }, actor)).ok).toBe(true);
+      expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "approval" }, actor)).ok).toBe(true);
       expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "auto" }, actor)).ok).toBe(false);
       expect((await f.routines.execute("routine-remove", { id: input.id }, actor)).ok).toBe(true);
     } finally { await f.cleanup(); }

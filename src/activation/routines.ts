@@ -12,14 +12,14 @@ import type { DryRunVerdict } from "../pipeline/verdict";
 import type { HandlerResult } from "../handlers/commands";
 
 const idSchema = z.string().max(100).regex(/^[a-z0-9][a-z0-9-]*$/);
-const policySchema = z.enum(["approve", "auto"]);
+const policySchema = z.enum(["approval", "auto"]);
 const addSchema = z.object({
   id: idSchema,
   schedule: z.string().min(1),
   timezone: z.string().min(1),
   target: z.string().min(1),
   payload: z.record(z.unknown()).default({}),
-  policy: policySchema.default("approve"),
+  policy: policySchema.default("approval"),
   flow: z.string().min(1).max(1048576).optional(),
   servesGoal: z.string().regex(/^G[0-9]+$/).optional(),
 }).strict();
@@ -92,7 +92,7 @@ export class RoutineCommands {
     if (flow !== undefined && "flow" in input.payload) throw new Error("--flow-file supplies payload.flow; do not also set payload.flow");
     const text = marker + (flow === undefined ? "" : flowOwnership) + stringify({ schema: ACTIVATION_SCHEMA_ID, activations: [{
       id: input.id, target: input.target, when: { schedule: input.schedule, timezone: input.timezone },
-      policy: input.policy === "approve" ? "approval" : "auto", payload: flow === undefined ? input.payload : { ...input.payload, flow: flowFile },
+      policy: input.policy, payload: flow === undefined ? input.payload : { ...input.payload, flow: flowFile },
       ...(input.servesGoal ? { serves: { goal: input.servesGoal } } : {}),
     }] });
     await this.validate(text, file, actor);
@@ -159,7 +159,7 @@ export class RoutineCommands {
     const document = z.object({ schema: z.string(), activations: z.array(z.record(z.unknown())).length(1) }).parse(parse(text));
     const entry = document.activations[0];
     if (!entry) throw new Error("Routine activation missing");
-    entry.policy = policy === "approve" ? "approval" : "auto";
+    entry.policy = policy;
     const next = marker + (text.startsWith(marker + flowOwnership) ? flowOwnership : "") + stringify(document);
     await this.validate(next, file, actor, true, policy === "auto");
     const temporary = `${file}.${crypto.randomUUID()}.tmp`;
@@ -180,7 +180,7 @@ export class RoutineCommands {
       if (!blueprint) continue;
       rows.push({ id: blueprint.id, schedule: "schedule" in blueprint.when ? blueprint.when.schedule : null,
         timezone: "timezone" in blueprint.when ? blueprint.when.timezone : null,
-        policy: blueprint.policy === "approval" ? "approve" : blueprint.policy,
+        policy: blueprint.policy,
         target: blueprint.target, lastDecision: this.deps.lastDecision(blueprint.id), file });
     }
     return rows;

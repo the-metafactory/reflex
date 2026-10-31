@@ -96,7 +96,7 @@ reflex routine set-policy weekly-review approve
 reflex routine remove weekly-review
 ```
 
-New routines default to `approve`, mapped to the activation policy `approval`; each scheduled fire waits for approval. Only an explicit `auto` promotion permits automatic firing. Removal and demotion to `approve` remain available during discovery outages. `routine list` includes schedule, timezone, policy, target and the last recorded decision; Dry Runs do not create history.
+New routines default to `approve`, mapped at the CLI boundary to the canonical activation policy `approval`; each scheduled fire waits for approval. JSON responses use `approval`. Only an explicit `auto` promotion permits automatic firing. Removal and demotion to `approve` remain available during discovery outages. `routine list` includes schedule, timezone, policy, target and the last recorded decision; Dry Runs do not create history.
 
 `routines_dir` defaults to `<activations_dir>/routines`, making separate activation directories keep separate routines. The daemon watches this additional directory and reloads additions, policy changes and removals. Only regular activation files carrying the generated-routine marker can be removed or changed with these verbs. Existing hand-written activations keep their behavior.
 
