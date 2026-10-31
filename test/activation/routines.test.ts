@@ -1,6 +1,6 @@
 import { createTransport } from "@the-metafactory/myelin";
 import { describe, it, expect } from "bun:test";
-import { mkdtemp, mkdir, readFile, writeFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, unlink, symlink, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoutineCommands } from "../../src/activation/routines";
@@ -48,6 +48,44 @@ async function until(predicate: () => boolean) {
 }
 
 describe("Reflex-owned routines with real loader and Dry Run", () => {
+  it("marks begun filesystem writes uncertain and recovers removal after only its owned flow was deleted", async () => {
+    const f = await fixture();
+    const activation = join(f.routinesDir, `${input.id}.yaml`);
+    const flowFile = join(f.routinesDir, "flows", `${input.id}.yaml`);
+    const routines = new RoutineCommands({
+      dir: f.routinesDir, sources: f.sources, knownTargets: async () => [input.target], lastDecision: () => null,
+      dryRun: async () => ({ wouldOutcome: "matched", reasons: [] }),
+    });
+    try {
+      expect((await routines.execute("routine-add", { ...input, flow: "name: F_TEST\nactions: [A_EXTRACT_URLS]" }, actor)).ok).toBe(true);
+      await chmod(f.routinesDir, 0o500);
+      expect(await routines.execute("routine-remove", { id: input.id }, actor)).toMatchObject({ ok: false, error: { code: "write-uncertain" } });
+      expect(await Bun.file(flowFile).exists()).toBe(false);
+      expect(await Bun.file(activation).exists()).toBe(true);
+      expect(await routines.execute("routine-list", {}, actor)).toMatchObject({ ok: true, data: [{ id: input.id }] });
+      await chmod(f.routinesDir, 0o700);
+      expect((await routines.execute("routine-remove", { id: input.id }, actor)).ok).toBe(true);
+      expect(await Bun.file(activation).exists()).toBe(false);
+      expect(await routines.execute("routine-remove", { id: "missing" }, actor)).toMatchObject({ ok: false, error: { code: "invalid-input" } });
+    } finally { await chmod(f.routinesDir, 0o700); await f.cleanup(); }
+  });
+
+  it("refuses symlinked owned flows before mutation and distinguishes prewrite validation refusal", async () => {
+    const f = await fixture();
+    try {
+      expect(await f.routines.execute("routine-add", { ...input, target: "@jc/missing" }, actor)).toMatchObject({ ok: false, error: { code: "invalid-input" } });
+      await f.routines.execute("routine-add", { ...input, flow: "name: F_TEST\nactions: [A_EXTRACT_URLS]" }, actor);
+      const flowFile = join(f.routinesDir, "flows", `${input.id}.yaml`);
+      const outside = join(f.dir, "manual-flow.yaml");
+      const text = await readFile(flowFile, "utf8");
+      await writeFile(outside, text);
+      await unlink(flowFile);
+      await symlink(outside, flowFile);
+      expect(await f.routines.execute("routine-remove", { id: input.id }, actor)).toMatchObject({ ok: false, error: { code: "invalid-input" } });
+      expect(await readFile(outside, "utf8")).toBe(text);
+      expect(await Bun.file(join(f.routinesDir, `${input.id}.yaml`)).exists()).toBe(true);
+    } finally { await f.cleanup(); }
+  });
   it("adds approve by default, hot reloads, changes policy and removes", async () => {
     const f = await fixture();
     try {

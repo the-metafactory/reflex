@@ -9,7 +9,7 @@ export type HandlerResult<T> =
   | {
       ok: false;
       error: {
-        code: "not-found" | "conflict" | "invalid-input" | "internal";
+  code: "not-found" | "conflict" | "invalid-input" | "write-uncertain" | "internal";
         message: string;
         currentState?: string;
       };
