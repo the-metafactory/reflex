@@ -71,7 +71,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
   });
 
   it.each([
-    { schedule: "bad cron" }, { timezone: "Invalid/Zone" }, { target: "@jc/unknown" },
+    { schedule: "invalid expression" }, { timezone: "Invalid/Zone" }, { target: "@jc/unknown" },
     { id: "../../escape" }, { payload: [] }, { policy: "disabled" }, { servesGoal: "bad" },
   ])("refuses invalid input without writing %j", async (invalid) => {
     const f = await fixture();
@@ -117,8 +117,10 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
       await until(() => f.store.get(input.id) !== undefined);
       await f.pipeline.evaluate({ blueprintId: input.id, kind: "schedule", payload: {}, actor, receivedAt: new Date().toISOString() });
       expect(await f.routines.execute("routine-list", {}, actor)).toMatchObject({ ok: true, data: [{ lastDecision: { outcome: "matched" } }] });
+      expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "auto" }, actor)).ok).toBe(true);
       const { deriveIdempotencyKey } = await import("../../src/pipeline/impulse");
       await f.repo.putIdempotencyKey(input.id, await deriveIdempotencyKey(input.id, {}), new Date(Date.now() + 60000).toISOString());
+      expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "approve" }, actor)).ok).toBe(true);
       expect((await f.routines.execute("routine-set-policy", { id: input.id, policy: "auto" }, actor)).ok).toBe(false);
       expect(await readFile(join(f.routinesDir, `${input.id}.yaml`), "utf8")).toContain("policy: approval");
     } finally { await f.cleanup(); }

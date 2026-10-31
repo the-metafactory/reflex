@@ -72,7 +72,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
   const routine = program.command("routine").description("Install and manage Reflex-owned scheduled routines");
   routine.command("add")
     .requiredOption("--id <id>")
-    .requiredOption("--schedule <cron>")
+    .requiredOption("--schedule <expression>")
     .requiredOption("--timezone <iana>")
     .requiredOption("--target <target>")
     .requiredOption("--payload <json>")
