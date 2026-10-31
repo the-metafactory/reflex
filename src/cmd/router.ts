@@ -1,3 +1,4 @@
+import type { RoutineCommands } from "../activation/routines";
 import type { BlueprintStore } from "../activation/store";
 import type { ReflexBus } from "../bus";
 import type { ReflexActor } from "../bus/envelopes";
@@ -26,6 +27,7 @@ export interface RouterDeps {
   repo: Repository;
   store: BlueprintStore;
   schedule: ScheduleSource;
+  routines?: RoutineCommands;
   daemonVersion: string;
   startedAt: string;
 }
@@ -99,6 +101,12 @@ export class CommandRouter {
   ): Promise<HandlerResult<unknown>> {
     const { handlers, pipeline, repo, store, schedule } = this.deps;
     switch (command) {
+      case "routine-add":
+      case "routine-remove":
+      case "routine-list":
+      case "routine-set-policy":
+        if (!this.deps.routines) return { ok: false, error: { code: "internal", message: "Routine commands unavailable" } };
+        return this.deps.routines.execute(command, args, actor);
       case "fire":
         return handlers.fire(String(args.blueprintId ?? ""), (args.input as Record<string, unknown>) ?? {}, actor);
       case "approve":

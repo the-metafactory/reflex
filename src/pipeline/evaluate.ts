@@ -261,11 +261,15 @@ export class Pipeline {
 
   /** Dry Run Verdict (FR-9): full prediction, zero writes, zero publishes. */
   async evaluateDry(impulse: Impulse): Promise<DryRunVerdict> {
-    const now = this.nowFn();
     const blueprint = this.store.get(impulse.blueprintId);
     if (!blueprint || blueprint.kind !== impulse.kind) {
       return { wouldOutcome: "ignored", reasons: ["no blueprint matches this impulse"] };
     }
+    return this.evaluateBlueprintDry(blueprint, impulse);
+  }
+
+  async evaluateBlueprintDry(blueprint: ActivationBlueprint, impulse: Impulse): Promise<DryRunVerdict> {
+    const now = this.nowFn();
     if (blueprint.policy === "disabled") {
       return { wouldOutcome: "ignored", reasons: ["policy is disabled"] };
     }

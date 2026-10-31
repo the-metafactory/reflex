@@ -69,6 +69,47 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     return { positionals, opts };
   };
 
+  const routine = program.command("routine").description("Install and manage Reflex-owned scheduled routines");
+  routine.command("add")
+    .requiredOption("--id <id>")
+    .requiredOption("--schedule <expression>")
+    .requiredOption("--timezone <iana>")
+    .requiredOption("--target <target>")
+    .requiredOption("--payload <json>")
+    .option("--policy <policy>", "approve or auto", "approve")
+    .option("--serves-goal <goal>")
+    .option("--flow-file <path>", "Install a supplied YAML flow into Reflex-owned storage")
+    .option("--json")
+    .addOption(requestTimeoutOption())
+    .action(async (opts: Record<string, unknown>, cmd: unknown) => {
+      let payload: unknown;
+      try { payload = JSON.parse(String(opts.payload)); } catch {
+        result = { exitCode: EXIT_DOMAIN, stdout: "", stderr: "--payload must be a JSON object" };
+        return;
+      }
+      let flow: string | undefined;
+      if (typeof opts.flowFile === "string") {
+        try { flow = await Bun.file(opts.flowFile).text(); } catch {
+          result = { exitCode: EXIT_DOMAIN, stdout: "", stderr: "Unable to read --flow-file" };
+          return;
+        }
+      }
+      await remote("routine-add", (data) => JSON.stringify(data), () => ({
+        id: opts.id, schedule: opts.schedule, timezone: opts.timezone, target: opts.target,
+        payload, policy: opts.policy === "approve" ? "approval" : opts.policy, ...(flow === undefined ? {} : { flow }), ...(opts.servesGoal ? { servesGoal: opts.servesGoal } : {}),
+      }))(opts, cmd);
+    });
+  routine.command("remove <id>").option("--json").addOption(requestTimeoutOption())
+    .action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {
+      await remote("routine-remove", (data) => JSON.stringify(data), () => ({ id }))(id, opts, cmd);
+    });
+  routine.command("set-policy <id> <policy>").option("--json").addOption(requestTimeoutOption())
+    .action(async (id: string, policy: string, opts: Record<string, unknown>, cmd: unknown) => {
+      await remote("routine-set-policy", (data) => JSON.stringify(data), () => ({ id, policy: policy === "approve" ? "approval" : policy }))(id, policy, opts, cmd);
+    });
+  routine.command("list").option("--json").addOption(requestTimeoutOption())
+    .action(remote("routine-list", (data) => table(data as Array<Record<string, unknown>>, ["id", "schedule", "policy", "target", "lastDecision"]), () => ({})));
+
   program
     .command("status")
     .description("Daemon health: blueprints, Matched Decisions awaiting approval, bus metrics.\nExample: reflex status --json")
