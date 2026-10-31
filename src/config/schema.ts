@@ -51,6 +51,9 @@ export const configSchema = z.object({
   /** Directory holding this instance's reflex.db (a leading `~/` expands).
    * Unset: the XDG state path (`defaultDbPath()`). A second instance on one
    * machine sets its own so the two never share a DB (reflex#36). */
+  routine_target_command: z.array(z.string().min(1)).min(1).optional(),
+  routine_target_timeout_ms: z.number().int().positive().max(60000).default(10000),
+  routines_dir: z.string().min(1).optional(),
   state_dir: z.string().min(1).optional(),
 });
 
@@ -63,5 +66,8 @@ export interface ReflexConfig {
   watchRoots: string[];
   activationsDir: string;
   /** Absolute (`~/` already expanded); undefined = default DB path. */
+  routineTargetCommand?: string[];
+  routineTargetTimeoutMs?: number;
+  routinesDir?: string;
   stateDir?: string;
 }

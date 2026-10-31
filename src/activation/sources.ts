@@ -6,6 +6,7 @@ export interface DiscoverOptions {
   watchRoots: string[];
   /** Central directory: every `*.yaml` is an activation document. */
   activationsDir: string;
+  routinesDir?: string;
   onWarning?: (message: string) => void;
 }
 
@@ -29,10 +30,11 @@ export async function discoverActivationFiles(options: DiscoverOptions): Promise
     }
   }
 
-  if (existsSync(options.activationsDir)) {
+  for (const dir of new Set([options.activationsDir, options.routinesDir].filter((dir): dir is string => dir !== undefined))) {
+    if (!existsSync(dir)) continue;
     const glob = new Bun.Glob("*.yaml");
-    for await (const rel of glob.scan({ cwd: options.activationsDir, absolute: false })) {
-      found.add(join(options.activationsDir, rel));
+    for await (const rel of glob.scan({ cwd: dir, absolute: false })) {
+      found.add(join(dir, rel));
     }
   }
 

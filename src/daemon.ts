@@ -1,3 +1,7 @@
+import { discoverRoutineTargets } from "./activation/target-command";
+import { join, resolve } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { RoutineCommands } from "./activation/routines";
 import { ActivationWatcher } from "./activation/watcher";
 import { discoverActivationFiles } from "./activation/sources";
 import { BlueprintStore, loadBlueprintSet } from "./activation/store";
@@ -16,6 +20,7 @@ import { dbPathFor } from "./store/paths";
 import { Repository } from "./store/repository";
 
 export interface DaemonOptions {
+  routineTargetLookup?: () => Promise<readonly string[]>;
   /** Override DB path (tests). Default: `cfg.stateDir`, else the XDG state path. */
   dbPath?: string;
   /** HTTP listener port (0 = ephemeral). Default 7717. */
@@ -70,7 +75,9 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
   async function assemble(): Promise<ReflexDaemon> {
   const repo = new Repository(db);
 
-  const sources = { watchRoots: cfg.watchRoots, activationsDir: cfg.activationsDir };
+  const routinesDir = resolve(cfg.routinesDir ?? join(cfg.activationsDir, "routines"));
+  await mkdir(routinesDir, { recursive: true });
+  const sources = { watchRoots: cfg.watchRoots, activationsDir: cfg.activationsDir, routinesDir };
   const store = new BlueprintStore(await loadBlueprintSet(await discoverActivationFiles(sources)));
   const watcher = new ActivationWatcher(store, sources);
 
@@ -97,6 +104,17 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
     repo,
     store,
     schedule,
+    routines: new RoutineCommands({
+      dir: routinesDir, sources, knownTargets: options.routineTargetLookup ?? (() => discoverRoutineTargets(cfg.routineTargetCommand, cfg.routineTargetTimeoutMs)),
+      dryRun: (blueprint, actor) => pipeline.evaluateBlueprintDry(blueprint, {
+        kind: blueprint.kind, blueprintId: blueprint.id, payload: blueprint.payload,
+        receivedAt: new Date().toISOString(), actor,
+      }),
+      lastDecision: (id) => {
+        const decision = repo.historyFor({ blueprintId: id, limit: 1 })[0];
+        return decision ? { id: decision.id, outcome: decision.outcome, at: decision.createdAt, reason: decision.guardBlockReason } : null;
+      },
+    }),
     daemonVersion: "0.1.0",
     startedAt: new Date().toISOString(),
   });

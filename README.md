@@ -76,6 +76,32 @@ reflex service uninstall --instance personal
 
 `install --instance` needs `--config` naming an existing, valid config that sets `state_dir` (read as the unit will: the file alone, no `REFLEX_*` overlay); without `state_dir` the two daemons would share one `reflex.db`. Instance names match `^[a-z0-9][a-z0-9-]{0,31}$`; any other name fails before a file or `launchctl` is touched. Every verb with `--instance` acts on that service only.
 
+## Scheduled routines
+
+`reflex routine` sends requests to the configured Reflex instance; the daemon owns the files. Configure a read-only target discovery command before adding routines:
+
+```yaml
+routine_target_command: [cortex, reflex, targets, --config, /absolute/stack/cortex.yaml, --json]
+routine_target_timeout_ms: 10000
+```
+
+Cortex loads its normal composed configuration and returns only `{"targets":["@principal/process"]}`. Reflex executes the configured argv without a shell, caps each output stream at 64KiB and refuses nonzero exits, timeouts, malformed JSON and unknown targets before writing. Do not put credentials in command arguments. An absent command disables routine creation without changing existing activations.
+
+```sh
+reflex routine add --id weekly-review --schedule "0 17 * * 5" --timezone Europe/Zurich --target @principal/process --payload '{}' --json
+reflex routine list --json
+reflex test weekly-review --json
+reflex routine set-policy weekly-review auto
+reflex routine set-policy weekly-review approve
+reflex routine remove weekly-review
+```
+
+New routines default to `approve`, mapped to the activation policy `approval`; each scheduled fire waits for approval. Only an explicit `auto` promotion permits automatic firing. Removal and demotion to `approve` remain available during discovery outages. `routine list` includes schedule, timezone, policy, target and the last recorded decision; Dry Runs do not create history.
+
+`routines_dir` defaults to `<activations_dir>/routines`, making separate activation directories keep separate routines. The daemon watches this additional directory and reloads additions, policy changes and removals. Only regular activation files carrying the generated-routine marker can be removed or changed with these verbs. Existing hand-written activations keep their behavior.
+
+For an already composed flow, add `--flow-file /path/to/flow.yaml`. The CLI transmits its contents; Reflex stores a marked copy at `<routines_dir>/flows/<id>.yaml` and supplies that absolute path as `payload.flow`. Do not also supply `payload.flow`. Reflex checks the flow document's basic shape and preserves its original YAML bytes after the ownership marker, including Pulse's sovereignty and residency annotations. It validates the activation with its loader and Dry Run, installs the flow before committing the activation, and rolls back a newly created flow if activation installation fails. It removes only its own marked flow alongside its activation. Pulse remains responsible for composition, whole-flow validation and execution. Flow storage alone does not execute anything.
+
 ## Boundaries
 
 | Reflex does | Reflex does not |

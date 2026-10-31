@@ -113,6 +113,9 @@ export function loadConfig(options: LoadOptions = {}): ReflexConfig {
     sovereignty: parsed.sovereignty,
     watchRoots: parsed.watch_roots,
     activationsDir: parsed.activations_dir,
+    ...(parsed.routine_target_command ? { routineTargetCommand: parsed.routine_target_command } : {}),
+    routineTargetTimeoutMs: parsed.routine_target_timeout_ms,
+    routinesDir: parsed.routines_dir ?? join(parsed.activations_dir, "routines"),
     ...(parsed.state_dir !== undefined ? { stateDir: expandHome(parsed.state_dir) } : {}),
   };
 }
