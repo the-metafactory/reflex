@@ -54,3 +54,7 @@ _Avoid_: Dry decision, test decision
 - Naming principle (from the `when:` and `pending` resolutions): **friendly surface, canonical core** — operator-facing surfaces (CLI verbs, config keywords) may use approachable words; every identifier beneath them (code, wire, storage, prose) uses the canonical term, and the glossary records the mapping.
 - "overlap" (Temporal-derived, used in the v0 design doc as `overlap: skip|buffer|cancel|allow`) — resolved: banned. The config key is the guard's canonical name (`run_lock: skip | buffer`); absence of a **Run Lock** means concurrent runs are allowed. `cancel` was already rejected as a boundary violation.
 - Wire envelope: DD-68 named CloudEvents, but the ecosystem converged on the **Myelin envelope** (`@the-metafactory/myelin`) — resolved: an **Activation Event** is carried as a MyelinEnvelope; "CloudEvents" describes the superseded 2026-04 design, not the wire.
+
+## Routines
+
+A **Routine** is the friendly authoring surface for a scheduled **Activation Blueprint** stored by Reflex. `approve` maps to the canonical `approval` **Activation Policy**. Target references come from a configured read-only discovery command owned by the execution runtime; Reflex has no separate target allowlist. A supplied flow remains an opaque execution document beyond basic shape validation: Reflex owns its generated storage and removal, while Pulse owns composition, whole-flow validation and execution.

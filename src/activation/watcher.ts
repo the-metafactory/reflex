@@ -55,7 +55,7 @@ export class ActivationWatcher {
 
   async start(): Promise<void> {
     this.lastHash = (await this.readCorpus()).hash;
-    const dirs = [...this.sources.watchRoots, this.sources.activationsDir];
+    const dirs = [...this.sources.watchRoots, this.sources.activationsDir, ...(this.sources.routinesDir ? [this.sources.routinesDir] : [])];
     for (const dir of dirs) {
       try {
         const watcher = watch(dir, { recursive: true }, () => this.schedule());
