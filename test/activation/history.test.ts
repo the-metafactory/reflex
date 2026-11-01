@@ -62,4 +62,14 @@ describe("routine owner history", () => {
       for (const args of [{ ...scope, principal: "foreign" }, { ...scope, stack: "foreign" }, { ...scope, limit: 101 }, { ...scope, cursor: "bad" }, { ...scope, routineId: "other", cursor: first.nextCursor }]) expect(() => routineHistory(repo, scope, store, args)).toThrow();
     } finally { close(); }
   });
+
+  it("does not attribute an old dispatch to a replacement target", () => {
+    const { db, close } = openDb(":memory:");
+    const repo = new Repository(db);
+    const store = new BlueprintStore(parseActivationDocument(document.replace("@test/pulse-flow", "@test/replacement"), "/tmp/test.yaml"));
+    try {
+      repo.recordDecision({ blueprintId: "fixture", outcome: "fired", correlationId: crypto.randomUUID(), impulse: { kind: "schedule", payload: {}, receivedAt: at } });
+      expect(routineHistory(repo, scope, store, { ...scope }).records[0]?.target).toBeNull();
+    } finally { close(); }
+  });
 });

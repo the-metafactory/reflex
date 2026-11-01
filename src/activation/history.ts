@@ -27,8 +27,8 @@ export function routineHistory(repo: Repository, scope: { principal: string; sta
       return {
         decisionId: row.id, routineId: row.blueprintId, routineName: row.impulse.routineName ?? row.blueprintId,
         nameSource: row.impulse.routineName ? "recorded" as const : "identifier" as const,
-        target: row.impulse.routineTarget ?? current?.target ?? null,
-        definitionPresent: Boolean(current), decision: row.outcome, at: row.createdAt, trigger: row.impulse.kind,
+        target: row.impulse.routineTarget ?? null,
+        definitionPresent: Boolean(current), decision: row.outcome, at: row.createdAt, impulseKind: row.impulse.kind,
         correlationId: row.outcome === "fired" ? row.correlationId : null, resolutionOf: row.resolutionOf,
         approval: approval ? { state: approval.state, decidedAt: approval.decidedAt, expiresAt: approval.expiresAt } : null,
       };
