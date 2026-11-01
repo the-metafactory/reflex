@@ -29,6 +29,7 @@ const flowDocument = z.object({ name: z.string().min(1), actions: z.array(z.unkn
 const flowMarker = (id: string) => `# reflex-generated-flow: ${id} v1\n`;
 const flowOwnership = "# reflex-owned-flow: v1\n";
 const marker = "# reflex-generated-routine: v1\n";
+const MAX_FLOW_BYTES = 1048576;
 
 class RoutineWriteUncertain extends Error {}
 
@@ -121,6 +122,7 @@ export class RoutineCommands {
     if (input.flow !== undefined) {
       flowDocument.parse(parse(input.flow));
       flow = flowMarker(input.id) + input.flow;
+      if (Buffer.byteLength(flow, "utf8") > MAX_FLOW_BYTES) throw new Error("Routine flow exceeds its UTF-8 byte size limit");
     }
     const flowFile = join(this.deps.dir, "flows", `${input.id}.yaml`);
     if (flow !== undefined && "flow" in input.payload) throw new Error("--flow-file supplies payload.flow; do not also set payload.flow");
@@ -245,7 +247,7 @@ export class RoutineCommands {
     const flowFile = entry.blueprint.payload.flow;
     if (typeof flowFile !== "string" || !isAbsolute(flowFile) || !/\.ya?ml$/.exec(flowFile)) return { ...entry, yaml: null, flowFile: null, writable: false, revision: "" };
     const stat = await lstat(flowFile);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1048576) throw new Error("Routine flow is not an inspectable regular YAML file");
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_FLOW_BYTES) throw new Error("Routine flow is not an inspectable regular YAML file");
     const yaml = await readFile(flowFile, "utf8");
     const activationStat = await lstat(entry.file);
     const writable = activationStat.isFile() && !activationStat.isSymbolicLink() && entry.text.startsWith(marker + flowOwnership) && resolve(entry.file) === resolve(this.file(id)) && resolve(flowFile) === resolve(join(this.deps.dir, "flows", `${id}.yaml`)) && yaml.startsWith(flowMarker(id));
@@ -270,6 +272,7 @@ export class RoutineCommands {
     if (original.revision !== revision) throw new Error("Routine changed since it was opened. Refresh before applying edits.");
     const result = await this.deps.flowContract(original.yaml, patches);
     if (!result.yaml) throw new Error("Flow contract did not confirm a validated update");
+    if (Buffer.byteLength(result.yaml, "utf8") > MAX_FLOW_BYTES) throw new Error("Routine flow exceeds its UTF-8 byte size limit");
     if (!result.yaml.startsWith(flowMarker(id))) throw new Error("Flow contract did not preserve ownership metadata");
     const temporary = `${original.flowFile}.${crypto.randomUUID()}.tmp`;
     try {

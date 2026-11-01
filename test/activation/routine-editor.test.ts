@@ -33,12 +33,31 @@ async function fixture() {
   const flowFile = join(routinesDir, "flows", "edit-test.yaml");
   const file = join(routinesDir, "edit-test.yaml");
   const inspect = () => routines.execute("routine-inspect", { id: "edit-test" }, actor);
-  return { dir, activationsDir, routines, flowFile, file, inspect, dryRuns: () => dryRuns, fork: () => new RoutineCommands(deps), lock: join(routinesDir, ".edit-test.write-lock"),
+  return { dir, activationsDir, routines, flowFile, file, inspect, dryRuns: () => dryRuns, fork: (contract = flowContract) => new RoutineCommands({ ...deps, flowContract: contract }), lock: join(routinesDir, ".edit-test.write-lock"),
     setDuring: (callback: () => Promise<void>) => { duringValidation = callback; }, setRefused: () => { refused = true; },
     cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
 
 describe("owner routine editing", () => {
+  it("refuses oversized UTF-8 contract output before replacing the installed flow", async () => {
+    const f = await fixture();
+    try {
+      const before = await readFile(f.flowFile, "utf8");
+      const inspected = await f.inspect();
+      if (!inspected.ok || typeof inspected.data !== "object" || !inspected.data || !("revision" in inspected.data)) throw new Error("inspect failed");
+      const oversized = `# reflex-generated-flow: edit-test v1\nname: F_TEST\ndescription: ${"ü".repeat(550000)}\nactions: [A_NOOP]\n`;
+      expect(oversized.length).toBeLessThan(1048576);
+      expect(Buffer.byteLength(oversized, "utf8")).toBeGreaterThan(1048576);
+      const other = f.fork(async () => ({ view, yaml: oversized }));
+      const result = await other.execute("routine-update", { id: "edit-test", revision: inspected.data.revision, patches: [{ path: ["actions", 0, "retry", "attempts"], value: 3 }] }, actor);
+      expect(result.ok).toBe(false);
+      expect(await readFile(f.flowFile, "utf8")).toBe(before);
+      expect((await f.inspect()).ok).toBe(true);
+      const added = await f.routines.execute("routine-add", { id: "oversized", schedule: "0 0 1 1 *", timezone: "UTC", target: "@test/pulse-flow", payload: {}, flow: oversized }, actor);
+      expect(added.ok).toBe(false);
+      expect(await Bun.file(join(f.dir, "routines", "oversized.yaml")).exists()).toBe(false);
+    } finally { await f.cleanup(); }
+  });
   it("coordinates every owner mutation across independent command instances", async () => {
     const f = await fixture();
     let signal = () => {};
