@@ -123,6 +123,9 @@ export class CommandRouter {
       case "routine-set-policy":
       case "routine-inspect":
       case "routine-update":
+      case "routine-schedule-inspect":
+      case "routine-schedule-preview":
+      case "routine-schedule-update":
         if (!this.deps.routines) return { ok: false, error: { code: "internal", message: "Routine commands unavailable" } };
         return this.deps.routines.execute(command, args, actor);
       case "fire":

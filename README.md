@@ -114,6 +114,12 @@ The command receives `{yaml, patches}` on stdin and returns `{view, yaml?}`. Pul
 
 `routine update <id> --revision <sha256> --patches '<json array>' --json` applies only schema-declared parameter patches to a generated, regular, owner-marked flow. A patch has a `path` array and a scalar `value`, for example `{"path":["actions",0,"retry","attempts"],"value":3}`. The revision covers activation and flow bytes. Updates serialize with existing routine writes, recheck the revision after validation and atomically replace only the flow. Schedule, policy and activation payload stay unchanged. Editing performs no Dry Run or execution. After a changed revision, refresh before retrying.
 
+`routine schedule inspect <id> --json` returns the installed schedule, stored timezone, effective timezone, revision and next three available occurrences. A null stored timezone uses the daemon's local timezone. Owned definitions can expose schedule editing without an inspectable flow.
+
+`routine schedule preview <id> --revision <sha256> --schedule '<expression>' --timezone <zone> --json` validates a proposed schedule with the scheduler's parser. The reply includes current and proposed occurrences, a reference time and `proposedRevision`. `--owner-timezone` replaces `--timezone` to omit the stored timezone and use the daemon default. Preview writes nothing and performs no evaluation.
+
+`routine schedule update` accepts the same arguments and requires `--proposed-revision <sha256>`. It takes the shared routine write lock, checks the activation and flow revision, and changes only the schedule and timezone source spans. Unrelated YAML values, flow bytes and handling policy remain unchanged. Shared YAML references and external definitions are read-only. A stale revision or mismatched preview refuses before replacement. A committed result whose readback cannot be verified reports `write-uncertain`.
+
 ## Boundaries
 
 | Reflex does | Reflex does not |

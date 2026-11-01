@@ -106,7 +106,7 @@ describe("owner routine editing", () => {
     try {
       await writeFile(join(f.activationsDir, "external.yaml"), stringify({ schema: ACTIVATION_SCHEMA_ID, activations: [{ id: "external", target: "@other/pulse-flow", when: { schedule: "0 9 * * *", timezone: "Europe/Zurich" }, policy: "disabled", payload: {} }] }));
       const result = await f.routines.execute("routine-list", {}, actor);
-      expect(result).toMatchObject({ ok: true, data: expect.arrayContaining([{ id: "external", schedule: "0 9 * * *", timezone: "Europe/Zurich", policy: "disabled", target: "@other/pulse-flow", lastDecision: null, file: join(f.activationsDir, "external.yaml"), readOnly: true }]) });
+      expect(result).toMatchObject({ ok: true, data: expect.arrayContaining([{ id: "external", schedule: "0 9 * * *", timezone: "Europe/Zurich", policy: "disabled", target: "@other/pulse-flow", lastDecision: null, file: join(f.activationsDir, "external.yaml"), readOnly: true, capabilities: { editSchedule: false } }]) });
     } finally { await f.cleanup(); }
   });
   it("atomically updates only flow bytes, preserves activation, and refuses stale or invalid edits without execution", async () => {

@@ -132,6 +132,18 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
       try { patches = JSON.parse(String(opts.patches)); } catch { result = { exitCode: EXIT_DOMAIN, stdout: "", stderr: "--patches must be a JSON array" }; return; }
       await remote("routine-update", (data) => JSON.stringify(data), () => ({ id, revision: opts.revision, patches }))(id, opts, cmd);
     });
+  const schedule = routine.command("schedule");
+  schedule.command("inspect <id>").option("--json").addOption(requestTimeoutOption()).action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {
+    await remote("routine-schedule-inspect", (data) => JSON.stringify(data), () => ({ id }))(id, opts, cmd);
+  });
+  for (const kind of ["preview", "update"]) {
+    const command = schedule.command(`${kind} <id>`).requiredOption("--revision <revision>").requiredOption("--schedule <expression>").option("--timezone <timezone>").option("--owner-timezone").option("--json").addOption(requestTimeoutOption());
+    if (kind === "update") command.requiredOption("--proposed-revision <revision>");
+    command.action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {
+      if ((typeof opts.timezone === "string") === Boolean(opts.ownerTimezone)) { result = { exitCode: EXIT_DOMAIN, stdout: "", stderr: "Choose exactly one of --timezone or --owner-timezone" }; return; }
+      await remote(kind === "preview" ? "routine-schedule-preview" : "routine-schedule-update", (data) => JSON.stringify(data), () => ({ id, revision: opts.revision, schedule: opts.schedule, timezone: opts.ownerTimezone ? null : opts.timezone, ...(kind === "update" ? { proposedRevision: opts.proposedRevision } : {}) }))(id, opts, cmd);
+    });
+  }
 
   program
     .command("status")

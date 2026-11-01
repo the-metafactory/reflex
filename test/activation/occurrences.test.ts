@@ -63,7 +63,7 @@ describe("owner schedule occurrences", () => {
       const input = { ...query, start, end: "2026-01-01T00:00:03Z", limit: 3 };
       const first = await f.read(input);
       expect(first).toMatchObject({ complete: false, counts: { scope: "page", total: 3, active: 2, disabled: 1 } });
-      expect(first.occurrences[0]).toMatchObject({ routineId: "a", scheduledFor: start.replace("Z", ".000Z"), readOnly: false, capabilities: { delete: true, editSchedule: false } });
+      expect(first.occurrences[0]).toMatchObject({ routineId: "a", scheduledFor: start.replace("Z", ".000Z"), readOnly: false, capabilities: { delete: true, editSchedule: true } });
       expect(first.occurrences[1]).toMatchObject({ routineId: "b", lifecycle: "disabled", handlingPolicy: null, readOnly: true, capabilities: { delete: false } });
       const second = await f.read({ ...input, cursor: first.nextCursor });
       expect(second.complete).toBe(true);
