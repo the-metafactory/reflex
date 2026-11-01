@@ -102,6 +102,8 @@ New routines default to `approve`, mapped at the CLI boundary to the canonical a
 
 For an already composed flow, add `--flow-file /path/to/flow.yaml`. The CLI transmits its contents; Reflex stores a marked copy at `<routines_dir>/flows/<id>.yaml` and supplies that absolute path as `payload.flow`. Do not also supply `payload.flow`. Reflex checks the flow document's basic shape and preserves its original YAML bytes after the ownership marker, including Pulse's sovereignty and residency annotations. It validates the activation with its loader and Dry Run, installs the flow before committing the activation, and rolls back a newly created flow if activation installation fails. It removes only its own marked flow alongside its activation. Pulse remains responsible for composition, whole-flow validation and execution. Flow storage alone does not execute anything.
 
+Routine mutations coordinate across owner instances through per-routine `<routines_dir>/.<id>.write-lock` files. A competing owner write refuses while that lock is held. An interrupted writer leaves its lock in place; an operator must verify that writer has stopped before removing the stale lock. Revision checks protect updates through the owner interfaces. Direct filesystem editing is outside that coordination protocol.
+
 `routine list --json` includes every scheduled activation in the configured discovery roots, including external and disabled definitions. External definitions are read-only. `routine inspect <id> --json` returns a revision and a redacted flow view when an inspection command is configured:
 
 ```yaml

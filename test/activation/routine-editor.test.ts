@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDocument, stringify } from "yaml";
@@ -26,18 +26,62 @@ async function fixture() {
     return { view, yaml: doc.toString() };
   };
   let dryRuns = 0;
-  const routines = new RoutineCommands({ dir: routinesDir, sources: { activationsDir, routinesDir, watchRoots: [] }, knownTargets: async () => ["@test/pulse-flow"], lastDecision: () => null, flowContract, dryRun: async () => { dryRuns++; return { wouldOutcome: "matched", reasons: [] }; } });
+  const deps = { dir: routinesDir, sources: { activationsDir, routinesDir, watchRoots: [] }, knownTargets: async () => ["@test/pulse-flow"], lastDecision: () => null, flowContract, dryRun: async (): Promise<{ wouldOutcome: "matched"; reasons: string[] }> => { dryRuns++; return { wouldOutcome: "matched", reasons: [] }; } };
+  const routines = new RoutineCommands(deps);
   const added = await routines.execute("routine-add", { id: "edit-test", schedule: "0 0 1 1 *", timezone: "UTC", target: "@test/pulse-flow", payload: { preserve: true }, flow: yaml }, actor);
   expect(added.ok).toBe(true);
   const flowFile = join(routinesDir, "flows", "edit-test.yaml");
   const file = join(routinesDir, "edit-test.yaml");
   const inspect = () => routines.execute("routine-inspect", { id: "edit-test" }, actor);
-  return { dir, activationsDir, routines, flowFile, file, inspect, dryRuns: () => dryRuns,
+  return { dir, activationsDir, routines, flowFile, file, inspect, dryRuns: () => dryRuns, fork: () => new RoutineCommands(deps), lock: join(routinesDir, ".edit-test.write-lock"),
     setDuring: (callback: () => Promise<void>) => { duringValidation = callback; }, setRefused: () => { refused = true; },
     cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
 
 describe("owner routine editing", () => {
+  it("coordinates every owner mutation across independent command instances", async () => {
+    const f = await fixture();
+    let signal = () => {};
+    let release = () => {};
+    const entered = new Promise<void>((resolve) => { signal = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let pending: ReturnType<RoutineCommands["execute"]> | undefined;
+    try {
+      const inspected = await f.inspect();
+      if (!inspected.ok || typeof inspected.data !== "object" || !inspected.data || !("revision" in inspected.data)) throw new Error("inspect failed");
+      const args = { id: "edit-test", revision: inspected.data.revision, patches: [{ path: ["actions", 0, "retry", "attempts"], value: 3 }] };
+      f.setDuring(async () => { signal(); await gate; });
+      pending = f.routines.execute("routine-update", args, actor);
+      await entered;
+      const other = f.fork();
+      const commands: { command: Parameters<RoutineCommands["execute"]>[0]; args: Record<string, unknown> }[] = [
+        { command: "routine-set-policy", args: { id: "edit-test", policy: "approval" } },
+        { command: "routine-remove", args: { id: "edit-test" } },
+        { command: "routine-update", args },
+        { command: "routine-add", args: { id: "edit-test", schedule: "0 0 1 1 *", timezone: "UTC", target: "@test/pulse-flow", payload: {} } },
+      ];
+      for (const { command, args: input } of commands) {
+        const result = await other.execute(command, input, actor);
+        expect(result).toMatchObject({ ok: false, error: { message: expect.stringContaining("Another routine writer") } });
+      }
+      release();
+      expect((await pending).ok).toBe(true);
+      expect((await other.execute("routine-update", args, actor)).ok).toBe(false);
+      expect(await readFile(f.flowFile, "utf8")).toContain("attempts: 3");
+      expect(f.dryRuns()).toBe(1);
+    } finally { release(); await pending; await f.cleanup(); }
+  });
+  it("preserves a replaced write lock instead of removing another owner's lock", async () => {
+    const f = await fixture();
+    try {
+      const inspected = await f.inspect();
+      if (!inspected.ok || typeof inspected.data !== "object" || !inspected.data || !("revision" in inspected.data)) throw new Error("inspect failed");
+      f.setDuring(async () => { await unlink(f.lock); await writeFile(f.lock, "other-owner"); });
+      const result = await f.routines.execute("routine-update", { id: "edit-test", revision: inspected.data.revision, patches: [{ path: ["actions", 0, "retry", "attempts"], value: 3 }] }, actor);
+      expect(result).toMatchObject({ ok: false, error: { code: "write-uncertain" } });
+      expect(await readFile(f.lock, "utf8")).toBe("other-owner");
+    } finally { await f.cleanup(); }
+  });
   it("lists external scheduled definitions read-only and leaves non-scheduled definitions out", async () => {
     const f = await fixture();
     try {

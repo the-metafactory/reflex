@@ -54,6 +54,18 @@ export class RoutineCommands {
   execute(command: "routine-add" | "routine-remove" | "routine-list" | "routine-set-policy" | "routine-inspect" | "routine-update", args: Record<string, unknown>, actor: ReflexActor): Promise<HandlerResult<unknown>> {
     const next = this.chain.then(async (): Promise<HandlerResult<unknown>> => {
       try {
+          const read = command === "routine-list" || command === "routine-inspect";
+          return read ? await this.run(command, args, actor) : await this.withWriteLock(idSchema.parse(args.id), () => this.run(command, args, actor));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Routine command refused";
+          return { ok: false, error: { code: error instanceof RoutineWriteUncertain ? "write-uncertain" : "invalid-input", message: message.replace(/\s+/g, " ").trim() } };
+        }
+      });
+    this.chain = next.catch(() => {});
+    return next;
+  }
+
+  private async run(command: "routine-add" | "routine-remove" | "routine-list" | "routine-set-policy" | "routine-inspect" | "routine-update", args: Record<string, unknown>, actor: ReflexActor): Promise<HandlerResult<unknown>> {
         switch (command) {
           case "routine-add": return { ok: true, data: await this.add(args, actor) };
           case "routine-remove": return { ok: true, data: await this.remove(args) };
@@ -62,13 +74,23 @@ export class RoutineCommands {
           case "routine-inspect": return { ok: true, data: await this.inspect(args) };
           case "routine-update": return { ok: true, data: await this.update(args) };
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Routine command refused";
-        return { ok: false, error: { code: error instanceof RoutineWriteUncertain ? "write-uncertain" : "invalid-input", message: message.replace(/\s+/g, " ").trim() } };
-      }
+  }
+
+  private async withWriteLock<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    await mkdir(this.deps.dir, { recursive: true });
+    const file = join(this.deps.dir, `.${id}.write-lock`);
+    const handle = await open(file, "wx", 0o600).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "EEXIST") throw new Error("Another routine writer holds this routine. Retry after it finishes; an interrupted writer requires operator lock cleanup.");
+      throw error;
     });
-    this.chain = next.catch(() => {});
-    return next;
+    const identity = await handle.stat();
+    try { return await operation(); }
+    finally {
+      await handle.close();
+      const current = await lstat(file);
+      if (current.ino !== identity.ino || current.dev !== identity.dev) throw new RoutineWriteUncertain("Routine write lock ownership changed; the replacement lock was preserved.");
+      await unlink(file);
+    }
   }
 
   private file(id: string): string {

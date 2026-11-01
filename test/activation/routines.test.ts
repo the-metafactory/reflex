@@ -48,7 +48,7 @@ async function until(predicate: () => boolean) {
 }
 
 describe("Reflex-owned routines with real loader and Dry Run", () => {
-  it("marks begun filesystem writes uncertain and recovers removal after only its owned flow was deleted", async () => {
+  it("refuses an unwritable owner before mutation and recovers a previously interrupted owned-flow removal", async () => {
     const f = await fixture();
     const activation = join(f.routinesDir, `${input.id}.yaml`);
     const flowFile = join(f.routinesDir, "flows", `${input.id}.yaml`);
@@ -59,11 +59,12 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
     try {
       expect((await routines.execute("routine-add", { ...input, flow: "name: F_TEST\nactions: [A_EXTRACT_URLS]" }, actor)).ok).toBe(true);
       await chmod(f.routinesDir, 0o500);
-      expect(await routines.execute("routine-remove", { id: input.id }, actor)).toMatchObject({ ok: false, error: { code: "write-uncertain" } });
-      expect(await Bun.file(flowFile).exists()).toBe(false);
+      expect(await routines.execute("routine-remove", { id: input.id }, actor)).toMatchObject({ ok: false, error: { code: "invalid-input" } });
+      expect(await Bun.file(flowFile).exists()).toBe(true);
       expect(await Bun.file(activation).exists()).toBe(true);
       expect(await routines.execute("routine-list", {}, actor)).toMatchObject({ ok: true, data: [{ id: input.id }] });
       await chmod(f.routinesDir, 0o700);
+      await unlink(flowFile);
       expect((await routines.execute("routine-remove", { id: input.id }, actor)).ok).toBe(true);
       expect(await Bun.file(activation).exists()).toBe(false);
       expect(await routines.execute("routine-remove", { id: "missing" }, actor)).toMatchObject({ ok: false, error: { code: "invalid-input" } });
