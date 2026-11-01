@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { Cron } from "croner";
 import { isMap, isScalar, isSeq, parseDocument, visit, type YAMLMap, type Scalar } from "yaml";
 import { z } from "zod";
@@ -34,7 +35,7 @@ function source(text: string) {
   const zone = when.get("timezone", true);
   const timezone = zone === undefined ? null : scalar(zone);
   if (when.anchor || entry.anchor || activations.anchor || map(document.contents).anchor) throw new Error("Shared YAML mappings cannot be edited safely");
-  return { when, schedule, timezone };
+  return { document, when, schedule, timezone };
 }
 
 export function storedSchedule(text: string): ScheduleValue {
@@ -60,9 +61,55 @@ export function scheduleProjection(value: ScheduleValue, at: number) {
   } finally { cron.stop(); }
 }
 
+interface SourceEdit { start: number; end: number; value: string }
+
+function insertTimezone(text: string, when: YAMLMap, schedule: Scalar<string>, timezone: string): SourceEdit {
+  if (!when.range || !schedule.range) throw new Error("Timezone insertion point is unavailable");
+  if (when.flow) {
+    const end = when.range[1] - 1;
+    if (text[end] !== "}") throw new Error("Inline schedule cannot be safely extended");
+    return { start: end, end, value: `, timezone: ${JSON.stringify(timezone)}` };
+  }
+  const pair = when.items.find((item) => isScalar(item.key) && item.key.value === "schedule");
+  if (!pair || !isScalar(pair.key) || !pair.key.range) throw new Error("Schedule indentation is unavailable");
+  const indent = text.slice(text.lastIndexOf("\n", pair.key.range[0]) + 1, pair.key.range[0]);
+  if (!/^ *$/.exec(indent)) throw new Error("Schedule indentation cannot be safely preserved");
+  const rangeEnd = when.range[2];
+  const line = text.lastIndexOf("\n", rangeEnd - 1) + 1;
+  const end = /^ *$/.exec(text.slice(line, rangeEnd)) ? line : rangeEnd;
+  return { start: end, end, value: `${text[end - 1] === "\n" ? "" : "\n"}${indent}timezone: ${JSON.stringify(timezone)}\n` };
+}
+
+function removeTimezone(text: string, when: YAMLMap, timezone: Scalar<string>): SourceEdit {
+  const pair = when.items.find((item) => isScalar(item.key) && item.key.value === "timezone");
+  if (!pair || !isScalar(pair.key) || !pair.key.range || !timezone.range || !when.range) throw new Error("Timezone removal point is unavailable");
+  if (when.flow) {
+    const prefix = text.slice(when.range[0], pair.key.range[0]);
+    const comma = prefix.lastIndexOf(",");
+    if (comma >= 0) return { start: when.range[0] + comma, end: timezone.range[1], value: "" };
+    const end = text.indexOf(",", timezone.range[1]);
+    if (end < 0 || end >= when.range[1]) throw new Error("Inline timezone cannot be safely removed");
+    return { start: pair.key.range[0], end: end + 1, value: "" };
+  }
+  const start = text.lastIndexOf("\n", pair.key.range[0]) + 1;
+  if (!/^ *$/.exec(text.slice(start, pair.key.range[0]))) throw new Error("Timezone indentation cannot be safely preserved");
+  return { start, end: timezone.range[2], value: "" };
+}
+
+const documentShape = z.object({ activations: z.array(z.object({ when: z.object({ schedule: z.unknown(), timezone: z.unknown().optional() }).passthrough() }).passthrough()).length(1) }).passthrough();
+function withoutSchedule(document: unknown) {
+  const value = documentShape.parse(document); const entry = value.activations[0];
+  if (!entry) throw new Error("Routine activation is unavailable");
+  const { schedule: _schedule, timezone: _timezone, ...when } = entry.when;
+  return { ...value, activations: [{ ...entry, when }] };
+}
+export function assertScheduleOnlyChange(original: unknown, proposed: unknown): void {
+  if (!isDeepStrictEqual(withoutSchedule(original), withoutSchedule(proposed))) throw new Error("The schedule edit would change unrelated routine values");
+}
+
 export function changedScheduleText(text: string, value: ScheduleValue): string {
-  const { when, schedule, timezone } = source(text);
-  const edits: { start: number; end: number; value: string }[] = [];
+  const original = source(text); const { when, schedule, timezone } = original;
+  const edits: SourceEdit[] = [];
   if (schedule.value !== value.schedule) {
     if (!schedule.range) throw new Error("Schedule source range is unavailable");
     edits.push({ start: schedule.range[0], end: schedule.range[1], value: JSON.stringify(value.schedule) });
@@ -71,42 +118,13 @@ export function changedScheduleText(text: string, value: ScheduleValue): string 
     if (timezone && value.timezone !== null) {
       if (!timezone.range) throw new Error("Timezone source range is unavailable");
       edits.push({ start: timezone.range[0], end: timezone.range[1], value: JSON.stringify(value.timezone) });
-    } else if (value.timezone !== null) {
-      if (!when.range || !schedule.range) throw new Error("Timezone insertion point is unavailable");
-      if (when.flow) {
-        const end = when.range[1] - 1;
-        if (text[end] !== "}") throw new Error("Inline schedule cannot be safely extended");
-        edits.push({ start: end, end, value: `, timezone: ${JSON.stringify(value.timezone)}` });
-      } else {
-        const pair = when.items.find((item) => isScalar(item.key) && item.key.value === "schedule");
-        if (!pair || !isScalar(pair.key) || !pair.key.range) throw new Error("Schedule indentation is unavailable");
-        const indent = text.slice(text.lastIndexOf("\n", pair.key.range[0]) + 1, pair.key.range[0]);
-        if (!/^ *$/.exec(indent)) throw new Error("Schedule indentation cannot be safely preserved");
-        const end = when.range[2];
-        edits.push({ start: end, end, value: `${text[end - 1] === "\n" ? "" : "\n"}${indent}timezone: ${JSON.stringify(value.timezone)}\n` });
-      }
-    } else {
-      const pair = when.items.find((item) => isScalar(item.key) && item.key.value === "timezone");
-      if (!pair || !isScalar(pair.key) || !pair.key.range || !timezone?.range || !when.range) throw new Error("Timezone removal point is unavailable");
-      if (when.flow) {
-        const prefix = text.slice(when.range[0], pair.key.range[0]);
-        const comma = prefix.lastIndexOf(",");
-        if (comma >= 0) edits.push({ start: when.range[0] + comma, end: timezone.range[1], value: "" });
-        else {
-          const end = text.indexOf(",", timezone.range[1]);
-          if (end < 0 || end >= when.range[1]) throw new Error("Inline timezone cannot be safely removed");
-          edits.push({ start: pair.key.range[0], end: end + 1, value: "" });
-        }
-      } else {
-        const start = text.lastIndexOf("\n", pair.key.range[0]) + 1;
-        if (!/^ *$/.exec(text.slice(start, pair.key.range[0]))) throw new Error("Timezone indentation cannot be safely preserved");
-        edits.push({ start, end: timezone.range[2], value: "" });
-      }
-    }
+    } else if (value.timezone !== null) edits.push(insertTimezone(text, when, schedule, value.timezone));
+    else if (timezone) edits.push(removeTimezone(text, when, timezone));
   }
   let next = text;
   for (const edit of edits.sort((a, b) => b.start - a.start)) next = next.slice(0, edit.start) + edit.value + next.slice(edit.end);
-  const actual = storedSchedule(next);
-  if (actual.schedule !== value.schedule || actual.timezone !== value.timezone) throw new Error("The proposed schedule could not be preserved exactly");
+  const actual = source(next);
+  if (actual.schedule.value !== value.schedule || (actual.timezone?.value ?? null) !== value.timezone) throw new Error("The proposed schedule could not be preserved exactly");
+  assertScheduleOnlyChange(original.document.toJS(), actual.document.toJS());
   return next;
 }

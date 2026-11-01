@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { parseDocument } from "yaml";
 import { z } from "zod";
 import { RoutineCommands } from "../../src/activation/routines";
-import { changedScheduleText, scheduleProjection, storedSchedule } from "../../src/activation/routine-schedule";
+import { assertScheduleOnlyChange, changedScheduleText, scheduleProjection, storedSchedule } from "../../src/activation/routine-schedule";
 import type { RoutineFlowContract } from "../../src/activation/routine-contract";
 
 const actor = { type: "operator", id: "test" } as const;
@@ -34,6 +34,36 @@ async function fixture(withFlow = true) {
 }
 
 describe("owner schedule preview and update", () => {
+  it("refuses semantic drift in every non-schedule field including future pause metadata", () => {
+    const activation = { id: "sample", when: { schedule: "0 8 * * *", timezone: "UTC" }, policy: "approval", payload: { keep: true }, guards: { max_concurrent: 1 }, paused: false, future: { nested: "keep" } };
+    const original = { schema: "test", activations: [activation], metadata: { keep: true } };
+    const changed = { ...activation, when: { schedule: "0 9 * * *", timezone: "Europe/Zurich" } };
+    expect(() => assertScheduleOnlyChange(original, { ...original, activations: [changed] })).not.toThrow();
+    for (const drift of [{ policy: "auto" }, { payload: { keep: false } }, { guards: { max_concurrent: 2 } }, { paused: true }, { future: { nested: "changed" } }]) expect(() => assertScheduleOnlyChange(original, { ...original, activations: [{ ...changed, ...drift }] })).toThrow("unrelated routine values");
+    expect(() => assertScheduleOnlyChange(original, { ...original, activations: [changed], metadata: { keep: false } })).toThrow("unrelated routine values");
+  });
+  it("inserts timezone before a sibling after a trailing comment without changing indentation", () => {
+    const text = "# reflex-generated-routine: v1\nschema: metafactory/activation/v1\nactivations:\n  - id: sample\n    target: '@test/noop'\n    when:\n      schedule: '0 8 * * *'\n      # keep this clock comment\n    payload: {note: 'keep  spaces'}\n    policy: approval\n";
+    const next = changedScheduleText(text, { schedule: "0 8 * * *", timezone: "UTC" });
+    expect(next).toContain("      # keep this clock comment\n      timezone: \"UTC\"\n    payload: {note: 'keep  spaces'}\n");
+    expect(parseDocument(next).toJS()).toMatchObject({ activations: [{ when: { schedule: "0 8 * * *", timezone: "UTC" }, payload: { note: "keep  spaces" }, policy: "approval" }] });
+  });
+
+  it("reports a committed readback failure as write-uncertain while retaining the installed change", async () => {
+    const f = await fixture();
+    try {
+      const current = await f.inspect(); const input = { id: current.id, revision: current.revision, schedule: "0 9 * * *", timezone: "UTC" };
+      const response = await f.commands.execute("routine-schedule-preview", input, actor); if (!response.ok) throw new Error(response.error.message);
+      const expected = preview.parse(response.data).proposedRevision;
+      const snapshot: unknown = Reflect.get(f.commands, "snapshot"); if (typeof snapshot !== "function") throw new Error("Owner snapshot seam unavailable");
+      let reads = 0;
+      Object.defineProperty(f.commands, "snapshot", { value: async (id: string) => { if (++reads === 3) throw new Error("readback fault after replacement"); const result: unknown = await Reflect.apply(snapshot, f.commands, [id]); return result; } });
+      expect(await f.commands.execute("routine-schedule-update", { ...input, proposedRevision: expected }, actor)).toMatchObject({ ok: false, error: { code: "write-uncertain" } });
+      expect((await f.inspect()).revision).toBe(expected);
+      expect(await readFile(f.file, "utf8")).toContain('schedule: "0 9 * * *"');
+    } finally { await f.cleanup(); }
+  });
+
   it("patches only nominated scalar spans, preserving comments quoted payload and nondecimal values", () => {
     const text = "# reflex-generated-routine: v1\nschema: metafactory/activation/v1\nactivations:\n  - id: sample\n    when:\n      schedule: '0 8 * * *' # clock\n      timezone: UTC\n    payload: {hex: 0x10, note: 'keep  spaces'}\n";
     const next = changedScheduleText(text, { schedule: "0 9 * * *", timezone: "Europe/Zurich" });

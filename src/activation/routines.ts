@@ -279,7 +279,7 @@ export class RoutineCommands {
     const stat = await lstat(state.file);
     const owned = stat.isFile() && !stat.isSymbolicLink() && state.text.startsWith(marker) && resolve(state.file) === resolve(this.file(id));
     let reason = owned ? "" : "This definition is owned outside Reflex routine storage and its schedule is read-only.";
-    if (!("schedule" in state.blueprint.when)) throw new Error("This routine does not have a scheduled trigger");
+    if (!("schedule" in state.blueprint.when)) throw new Error("This routine does not have a scheduled When Block");
     let current: ScheduleValue = { schedule: state.blueprint.when.schedule, timezone: state.blueprint.when.timezone ?? null };
     try { current = storedSchedule(state.text); }
     catch (error) { reason = error instanceof Error ? error.message : "The stored schedule cannot be safely edited"; }
@@ -321,10 +321,12 @@ export class RoutineCommands {
       if (current.revision !== input.revision) throw new Error("Routine changed while validating the schedule. Refresh before applying edits.");
       await writing(() => rename(temporary, prepared.state.file));
     } finally { await unlink(temporary).catch(() => {}); }
-    const installed = await this.scheduleState(input.id);
-    if (installed.revision !== proposedRevision || installed.text !== prepared.text) throw new RoutineWriteUncertain("The owner could not verify the committed schedule. Refresh before retrying.");
-    const at = Date.now();
-    return { id: input.id, revision: installed.revision, at: new Date(at).toISOString(), writable: installed.scheduleWritable, reason: installed.scheduleReason, current: scheduleProjection(installed.current, at) };
+    return writing(async () => {
+      const installed = await this.scheduleState(input.id);
+      if (installed.revision !== proposedRevision || installed.text !== prepared.text) throw new RoutineWriteUncertain("The owner could not verify the committed schedule. Refresh before retrying.");
+      const at = Date.now();
+      return { id: input.id, revision: installed.revision, at: new Date(at).toISOString(), writable: installed.scheduleWritable, reason: installed.scheduleReason, current: scheduleProjection(installed.current, at) };
+    });
   }
 
   private async update(args: Record<string, unknown>) {
