@@ -6,6 +6,7 @@ import { z } from "zod";
 import { discoverActivationFiles, type DiscoverOptions } from "./sources";
 import { loadBlueprintSet } from "./store";
 import type { ActivationBlueprint } from "./types";
+import { storedSchedule } from "./routine-schedule";
 
 const instant = z.string().datetime({ offset: true });
 const zone = z.string().min(1).max(100).refine((value) => {
@@ -33,7 +34,9 @@ async function inspectOwnership(blueprint: ActivationBlueprint, dir: string, flo
       } catch { editParameters = false; }
     }
   }
-  return { readOnly: !owned, capabilities: { editParameters, editSchedule: false, pause: false, delete: owned, setPolicy: owned } };
+  let editSchedule = false;
+  if (owned) { try { storedSchedule(text); editSchedule = true; } catch { editSchedule = false; } }
+  return { readOnly: !owned, capabilities: { editParameters, editSchedule, pause: false, delete: owned, setPolicy: owned } };
 }
 
 export async function routineOccurrences(options: {

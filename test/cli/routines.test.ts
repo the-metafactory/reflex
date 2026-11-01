@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile, access } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, access, readFile } from "node:fs/promises";
+import { z } from "zod";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTransport } from "@the-metafactory/myelin";
@@ -105,5 +106,22 @@ describe("routine CLI through daemon command protocol", () => {
     expect(history.stdout).not.toContain("fixture-only");
     expect((await run(["routine", "history", "--stack", "foreign", "--json"])).exitCode).toBe(1);
     expect((await run(["routine", "history", "--limit", "101", "--json"])).exitCode).toBe(1);
+  });
+
+  it("previews and confirms schedule updates over real RPC with revision refusal and no execution", async () => {
+    const history = daemon.repo.historyFor({ limit: 100 });
+    expect((await run(["routine", "add", "--id", "cli-schedule", "--schedule", "0 0 1 1 *", "--timezone", "UTC", "--target", "@jc/noop", "--payload", "{}", "--json"])).exitCode).toBe(0);
+    const file = join(dir, "routines", "cli-schedule.yaml"); const before = await readFile(file, "utf8");
+    const inspected = await run(["routine", "schedule", "inspect", "cli-schedule", "--json"]); expect(inspected.exitCode).toBe(0);
+    const current = z.object({ revision: z.string() }).parse(JSON.parse(inspected.stdout));
+    const fields = ["cli-schedule", "--revision", current.revision, "--schedule", "0 9 1 1 *", "--owner-timezone"];
+    const response = await run(["routine", "schedule", "preview", ...fields, "--json"]); expect(response.exitCode).toBe(0);
+    const planned = z.object({ proposedRevision: z.string() }).parse(JSON.parse(response.stdout)); expect(await readFile(file, "utf8")).toBe(before);
+    const update = ["routine", "schedule", "update", ...fields, "--proposed-revision", planned.proposedRevision, "--json"];
+    const saved = await run(update); expect(saved.exitCode).toBe(0); expect(JSON.parse(saved.stdout)).toMatchObject({ revision: planned.proposedRevision, current: { schedule: "0 9 1 1 *", timezone: null } });
+    expect((await run(update)).exitCode).toBe(1);
+    expect((await run(["routine", "schedule", "preview", "cli-schedule", "--revision", planned.proposedRevision, "--schedule", "invalid", "--timezone", "UTC", "--json"])).exitCode).toBe(1);
+    expect(daemon.repo.historyFor({ limit: 100 })).toEqual(history);
+    expect((await run(["routine", "remove", "cli-schedule", "--json"])).exitCode).toBe(0);
   });
 });

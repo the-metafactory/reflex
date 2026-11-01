@@ -2,8 +2,8 @@ import { mkdir, open, readFile, rename, unlink, lstat, link } from "node:fs/prom
 import { join, resolve, isAbsolute } from "node:path";
 import { stringify, parse } from "yaml";
 import { z } from "zod";
-import { createHash } from "node:crypto";
 import { RoutinePatchSchema, type RoutineFlowContract } from "./routine-contract";
+import { ScheduleChangeSchema, changedScheduleText, routineRevision, scheduleProjection, storedSchedule, type ScheduleValue } from "./routine-schedule";
 import { Cron } from "croner";
 import { parseActivationDocument, ACTIVATION_SCHEMA_ID } from "./schema";
 import { discoverActivationFiles, type DiscoverOptions } from "./sources";
@@ -31,6 +31,7 @@ const flowMarker = (id: string) => `# reflex-generated-flow: ${id} v1\n`;
 const flowOwnership = "# reflex-owned-flow: v1\n";
 const marker = "# reflex-generated-routine: v1\n";
 const MAX_FLOW_BYTES = 1048576;
+type RoutineCommand = "routine-add" | "routine-remove" | "routine-list" | "routine-set-policy" | "routine-inspect" | "routine-update" | "routine-schedule-inspect" | "routine-schedule-preview" | "routine-schedule-update";
 
 class RoutineWriteUncertain extends Error {}
 
@@ -53,10 +54,10 @@ export class RoutineCommands {
 
   constructor(private readonly deps: RoutineDeps) {}
 
-  execute(command: "routine-add" | "routine-remove" | "routine-list" | "routine-set-policy" | "routine-inspect" | "routine-update", args: Record<string, unknown>, actor: ReflexActor): Promise<HandlerResult<unknown>> {
+  execute(command: RoutineCommand, args: Record<string, unknown>, actor: ReflexActor): Promise<HandlerResult<unknown>> {
     const next = this.chain.then(async (): Promise<HandlerResult<unknown>> => {
       try {
-          const read = command === "routine-list" || command === "routine-inspect";
+          const read = command === "routine-list" || command === "routine-inspect" || command === "routine-schedule-inspect" || command === "routine-schedule-preview";
           return read ? await this.run(command, args, actor) : await this.withWriteLock(idSchema.parse(args.id), () => this.run(command, args, actor));
         } catch (error) {
           const message = error instanceof Error ? error.message : "Routine command refused";
@@ -67,7 +68,7 @@ export class RoutineCommands {
     return next;
   }
 
-  private async run(command: "routine-add" | "routine-remove" | "routine-list" | "routine-set-policy" | "routine-inspect" | "routine-update", args: Record<string, unknown>, actor: ReflexActor): Promise<HandlerResult<unknown>> {
+  private async run(command: RoutineCommand, args: Record<string, unknown>, actor: ReflexActor): Promise<HandlerResult<unknown>> {
         switch (command) {
           case "routine-add": return { ok: true, data: await this.add(args, actor) };
           case "routine-remove": return { ok: true, data: await this.remove(args) };
@@ -75,6 +76,9 @@ export class RoutineCommands {
           case "routine-set-policy": return { ok: true, data: await this.setPolicy(args, actor) };
           case "routine-inspect": return { ok: true, data: await this.inspect(args) };
           case "routine-update": return { ok: true, data: await this.update(args) };
+          case "routine-schedule-inspect": return { ok: true, data: await this.inspectSchedule(args) };
+          case "routine-schedule-preview": return { ok: true, data: await this.previewSchedule(args) };
+          case "routine-schedule-update": return { ok: true, data: await this.updateSchedule(args) };
         }
   }
 
@@ -225,11 +229,15 @@ export class RoutineCommands {
       const file = blueprint.sourceFile;
       const text = await readFile(file, "utf8");
       if (!("schedule" in blueprint.when)) continue;
+      let editSchedule = false;
+      try { editSchedule = text.startsWith(marker) && idSchema.safeParse(blueprint.id).success && resolve(file) === resolve(this.file(blueprint.id)) && (await lstat(file)).isFile(); if (editSchedule) storedSchedule(text); }
+      catch { editSchedule = false; }
       rows.push({ id: blueprint.id, schedule: "schedule" in blueprint.when ? blueprint.when.schedule : null,
         timezone: "timezone" in blueprint.when ? blueprint.when.timezone ?? null : null,
         policy: blueprint.policy,
         target: blueprint.target, lastDecision: this.deps.lastDecision(blueprint.id), file,
         readOnly: !this.deps.flowContract || !text.startsWith(marker + flowOwnership) || !idSchema.safeParse(blueprint.id).success || resolve(file) !== resolve(this.file(blueprint.id)),
+        capabilities: { editSchedule },
       });
     }
     return rows;
@@ -246,13 +254,13 @@ export class RoutineCommands {
     const entry = matches[0];
     if (!entry) throw new Error("Routine is unavailable");
     const flowFile = entry.blueprint.payload.flow;
-    if (typeof flowFile !== "string" || !isAbsolute(flowFile) || !/\.ya?ml$/.exec(flowFile)) return { ...entry, yaml: null, flowFile: null, writable: false, revision: "" };
+    if (typeof flowFile !== "string" || !isAbsolute(flowFile) || !/\.ya?ml$/.exec(flowFile)) return { ...entry, yaml: null, flowFile: null, writable: false, revision: routineRevision(entry.text, null) };
     const stat = await lstat(flowFile);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_FLOW_BYTES) throw new Error("Routine flow is not an inspectable regular YAML file");
     const yaml = await readFile(flowFile, "utf8");
     const activationStat = await lstat(entry.file);
     const writable = activationStat.isFile() && !activationStat.isSymbolicLink() && entry.text.startsWith(marker + flowOwnership) && resolve(entry.file) === resolve(this.file(id)) && resolve(flowFile) === resolve(join(this.deps.dir, "flows", `${id}.yaml`)) && yaml.startsWith(flowMarker(id));
-    const revision = createHash("sha256").update(entry.text).update("\0").update(yaml).digest("hex");
+    const revision = routineRevision(entry.text, yaml);
     return { ...entry, yaml, flowFile, writable, revision };
   }
 
@@ -264,6 +272,59 @@ export class RoutineCommands {
     if (!this.deps.flowContract) return { ...base, flow: null, reason: "The owner has no configured flow inspection contract. Editing is unavailable." };
     const result = await this.deps.flowContract(state.yaml, []);
     return { ...base, flow: result.view, reason: state.writable ? "" : "This definition is owned outside Reflex routine storage and is read-only." };
+  }
+
+  private async scheduleState(id: string) {
+    const state = await this.snapshot(id);
+    const stat = await lstat(state.file);
+    const owned = stat.isFile() && !stat.isSymbolicLink() && state.text.startsWith(marker) && resolve(state.file) === resolve(this.file(id));
+    let reason = owned ? "" : "This definition is owned outside Reflex routine storage and its schedule is read-only.";
+    if (!("schedule" in state.blueprint.when)) throw new Error("This routine does not have a scheduled trigger");
+    let current: ScheduleValue = { schedule: state.blueprint.when.schedule, timezone: state.blueprint.when.timezone ?? null };
+    try { current = storedSchedule(state.text); }
+    catch (error) { reason = error instanceof Error ? error.message : "The stored schedule cannot be safely edited"; }
+    return { ...state, current, scheduleWritable: owned && !reason, scheduleReason: reason };
+  }
+
+  private async inspectSchedule(args: Record<string, unknown>) {
+    const { id } = z.object({ id: idSchema }).strict().parse(args);
+    const state = await this.scheduleState(id);
+    const at = Date.now();
+    return { id, revision: state.revision, at: new Date(at).toISOString(), writable: state.scheduleWritable, reason: state.scheduleReason, current: scheduleProjection(state.current, at) };
+  }
+
+  private async prepareSchedule(args: Record<string, unknown>) {
+    const input = ScheduleChangeSchema.parse(args);
+    const state = await this.scheduleState(input.id);
+    if (!state.scheduleWritable) throw new Error(state.scheduleReason);
+    if (state.revision !== input.revision) throw new Error("Routine changed since it was opened. Refresh before applying schedule edits.");
+    const at = Date.now();
+    const proposed = scheduleProjection({ schedule: input.schedule, timezone: input.timezone }, at);
+    const text = changedScheduleText(state.text, proposed);
+    const [blueprint] = parseActivationDocument(text, state.file);
+    if (!blueprint || blueprint.id !== input.id) throw new Error("The schedule edit changed routine identity");
+    return { input, state, text, reply: { id: input.id, revision: state.revision, proposedRevision: routineRevision(text, state.yaml), at: new Date(at).toISOString(), current: scheduleProjection(state.current, at), proposed } };
+  }
+
+  private async previewSchedule(args: Record<string, unknown>) {
+    return (await this.prepareSchedule(args)).reply;
+  }
+
+  private async updateSchedule(args: Record<string, unknown>) {
+    const { proposedRevision, ...input } = ScheduleChangeSchema.extend({ proposedRevision: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(args);
+    const prepared = await this.prepareSchedule(input);
+    if (prepared.reply.proposedRevision !== proposedRevision) throw new Error("The confirmed schedule preview does not match this update");
+    const temporary = `${prepared.state.file}.${crypto.randomUUID()}.tmp`;
+    try {
+      await Bun.write(temporary, prepared.text, { mode: 0o600 });
+      const current = await this.snapshot(input.id);
+      if (current.revision !== input.revision) throw new Error("Routine changed while validating the schedule. Refresh before applying edits.");
+      await writing(() => rename(temporary, prepared.state.file));
+    } finally { await unlink(temporary).catch(() => {}); }
+    const installed = await this.scheduleState(input.id);
+    if (installed.revision !== proposedRevision || installed.text !== prepared.text) throw new RoutineWriteUncertain("The owner could not verify the committed schedule. Refresh before retrying.");
+    const at = Date.now();
+    return { id: input.id, revision: installed.revision, at: new Date(at).toISOString(), writable: installed.scheduleWritable, reason: installed.scheduleReason, current: scheduleProjection(installed.current, at) };
   }
 
   private async update(args: Record<string, unknown>) {
