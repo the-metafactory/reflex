@@ -25,6 +25,11 @@ export async function routineOccurrences(options: {
 }) {
   const query = OccurrenceQuerySchema.parse(options.args);
   if (query.principal !== options.scope.principal || query.stack !== options.scope.stack) throw new Error("Routine owner scope does not match the requested principal and stack");
+  for (const source of new Set([options.sources.activationsDir, options.sources.routinesDir, options.dir].filter((value): value is string => value !== undefined))) {
+    try {
+      if (!(await lstat(source)).isDirectory()) throw new Error("Not a directory");
+    } catch { throw new Error("Routine discovery is incomplete: a configured source directory is unavailable"); }
+  }
   const files = await discoverActivationFiles({ ...options.sources, onWarning: () => { throw new Error("Routine discovery is incomplete: a configured source is unavailable"); } });
   const blueprints = await loadBlueprintSet(files);
   if (blueprints.length > 2000) throw new Error("Routine inventory exceeds the occurrence query limit");
@@ -62,6 +67,7 @@ export async function routineOccurrences(options: {
     if (after.snapshot !== snapshot || Date.parse(after.at) < Date.parse(query.start) || Date.parse(after.at) >= Date.parse(query.end)) throw new Error("The calendar query changed; restart from its first page");
   }
   const boundary = after ? Date.parse(after.at) : Date.parse(query.start);
+  const end = Date.parse(query.end);
   const pending = entries.map((entry) => {
     const cron = new Cron(entry.schedule, { timezone: entry.sourceTimezone });
     let next = cron.nextRun(new Date(boundary - 1));
@@ -70,13 +76,16 @@ export async function routineOccurrences(options: {
   });
   const occurrences = [];
   while (occurrences.length <= query.limit) {
-    const candidate = pending.filter((p) => p.next && p.next.getTime() < Date.parse(query.end)).sort((a, b) => {
-      const time = (a.next?.getTime() ?? 0) - (b.next?.getTime() ?? 0);
-      return time || (a.entry.routineId < b.entry.routineId ? -1 : a.entry.routineId > b.entry.routineId ? 1 : 0);
-    })[0];
+    let candidate: typeof pending[number] | undefined;
+    for (const item of pending) {
+      if (!item.next || item.next.getTime() >= end) continue;
+      if (!candidate?.next || item.next.getTime() < candidate.next.getTime() || (item.next.getTime() === candidate.next.getTime() && item.entry.routineId < candidate.entry.routineId)) candidate = item;
+    }
     if (!candidate?.next) break;
     occurrences.push({ ...candidate.entry, scheduledFor: candidate.next.toISOString() });
+    const previous = candidate.next.getTime();
     candidate.next = candidate.cron.nextRun(candidate.next);
+    if (candidate.next && candidate.next.getTime() <= previous) throw new Error("The scheduling owner returned a non-increasing occurrence");
   }
   const complete = occurrences.length <= query.limit;
   const page = occurrences.slice(0, query.limit);

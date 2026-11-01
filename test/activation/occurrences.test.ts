@@ -83,6 +83,8 @@ describe("owner schedule occurrences", () => {
     try {
       for (const invalid of [{ end: query.start }, { end: "2027-01-01T00:00:00Z" }, { timezone: "Invalid/Zone" }, { limit: 1001 }, { limit: 0 }, { principal: "foreign" }, { stack: "foreign" }, { cursor: "bad" }]) await expect(f.read({ ...query, ...invalid })).rejects.toThrow();
       await expect(routineOccurrences({ sources: { ...f.sources, watchRoots: [join(f.dir, "missing")] }, dir: f.owned, flowEditing: false, scope, args: query })).rejects.toThrow("discovery is incomplete");
+      await expect(routineOccurrences({ sources: { ...f.sources, activationsDir: join(f.dir, "absent-activations") }, dir: f.owned, flowEditing: false, scope, args: query })).rejects.toThrow("source");
+      await expect(routineOccurrences({ sources: { ...f.sources, routinesDir: join(f.dir, "absent-routines") }, dir: f.owned, flowEditing: false, scope, args: query })).rejects.toThrow("source");
       await writeFile(join(f.central, "broken.yaml"), "bad");
       await expect(f.read()).rejects.toThrow();
     } finally { await f.cleanup(); }

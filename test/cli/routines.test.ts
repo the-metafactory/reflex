@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { mkdtemp, rm, writeFile, access } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTransport } from "@the-metafactory/myelin";
@@ -22,6 +22,7 @@ let dir: string;
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "reflex-routine-cli-"));
+  await mkdir(join(dir, "activations"));
   const contract = join(dir, "contract.ts");
   await writeFile(contract, `const input = JSON.parse(await Bun.stdin.text());
 const attempts = Number(/attempts: (\\d+)/.exec(input.yaml)?.[1] ?? 2);
