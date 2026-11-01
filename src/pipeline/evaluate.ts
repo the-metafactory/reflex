@@ -240,27 +240,40 @@ export class Pipeline {
     const decision = await this.repo.getDecision(fired.decisionId);
     if (!decision) return null;
     const blueprintId = decision.blueprintId;
-    await this.repo.releaseRunLock(blueprintId, correlationId);
-    // Blueprint checked BEFORE consuming the buffer: a hot-reload-removed
-    // blueprint must not silently swallow the impulse (sage cycle-2 finding)
-    // — the orphaned buffer is discarded LOUDLY.
-    const blueprint = this.store.get(blueprintId);
-    if (!blueprint) {
-      const orphan = await this.repo.takeBufferedImpulse(blueprintId);
-      if (orphan) {
-        console.warn(
-          `[reflex-pipeline] discarding Buffered Impulse for removed blueprint ${blueprintId} ` +
-            `(buffered by decision ${orphan.bufferedByDecisionId ?? "unknown"})`,
-        );
+    return this.serialized(blueprintId, async () => {
+      await this.repo.releaseRunLock(blueprintId, correlationId);
+      const blueprint = this.store.get(blueprintId);
+      const buffered = await this.repo.takeBufferedImpulse(blueprintId);
+      if (!buffered) return null;
+      if (!blueprint) {
+        console.warn(`[reflex-pipeline] discarding Buffered Impulse for removed blueprint ${blueprintId} (buffered by decision ${buffered.bufferedByDecisionId ?? "unknown"})`);
+        return null;
       }
-      return null;
+      const impulse = impulseFromSnapshot(buffered.impulse, blueprintId, { type: "system", id: "reflex-buffer" });
+      if (blueprint.kind === "schedule" && blueprint.paused) {
+        const approval = await this.bufferApproval(blueprintId, buffered.bufferedByDecisionId);
+        if (approval !== "approved") {
+          if (approval === "unknown") console.warn(`[reflex-pipeline] suppressing paused buffer with unconfirmed approval provenance for ${blueprintId}`);
+          await this.repo.bumpIgnored(blueprintId, this.nowFn().slice(0, 10));
+          return { outcome: "ignored", reason: "paused" };
+        }
+      }
+      return this.guardsAndFire(blueprint, impulse, this.nowFn(), buffered.bufferedByDecisionId ?? undefined);
+    });
+  }
+
+  private async bufferApproval(blueprintId: string, decisionId: string | null): Promise<"approved" | "ordinary" | "unknown"> {
+    const seen = new Set<string>();
+    while (decisionId && !seen.has(decisionId) && seen.size < 64) {
+      seen.add(decisionId);
+      const decision = await this.repo.getDecision(decisionId);
+      if (!decision || decision.blueprintId !== blueprintId) return "unknown";
+      if (decision.outcome === "matched") return (await this.repo.getApproval(decision.id))?.state === "approved" ? "approved" : "ordinary";
+      if (decision.outcome !== "blocked" || decision.guardBlockReason !== "run-lock-buffered") return "unknown";
+      if (!decision.resolutionOf) return "ordinary";
+      decisionId = decision.resolutionOf;
     }
-    const buffered = await this.repo.takeBufferedImpulse(blueprintId);
-    if (!buffered) return null;
-    const impulse = impulseFromSnapshot(buffered.impulse, blueprintId, { type: "system", id: "reflex-buffer" });
-    return this.serialized(blueprintId, () =>
-      this.guardsAndFire(blueprint, impulse, this.nowFn(), buffered.bufferedByDecisionId ?? undefined),
-    );
+    return "unknown";
   }
 
   /** Dry Run Verdict (FR-9): full prediction, zero writes, zero publishes. */

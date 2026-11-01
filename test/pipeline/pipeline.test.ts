@@ -197,6 +197,64 @@ describe("scenario 4: buffer holds newest, re-presents once", () => {
     await close();
   });
 
+  it("discards a buffered scheduled trigger when pause wins serialized admission", async () => {
+    const scheduled = bp({ kind: "schedule", when: { schedule: "0 8 * * *", timezone: "UTC" }, guards: { runLock: "buffer" } });
+    const f = rig([scheduled]); await f.ready;
+    try {
+      const fired = await f.pipeline.evaluate(impulse({ kind: "schedule", payload: { n: 0 } }));
+      if (fired.outcome !== "fired") throw new Error("Expected running execution");
+      expect((await f.pipeline.evaluate(impulse({ kind: "schedule", payload: { n: 1 } }))).outcome).toBe("blocked");
+      let release = () => {}; let entered = () => {};
+      const gate = new Promise<void>((done) => { release = done; }); const ready = new Promise<void>((done) => { entered = done; });
+      const pausing = f.pipeline.serializeChange("bp", async () => { entered(); await gate; f.store.swap([{ ...scheduled, paused: true }]); });
+      await ready;
+      const completion = f.pipeline.onRunCompleted(fired.correlationId, "succeeded");
+      await Bun.sleep(10); release(); await pausing;
+      expect(await completion).toEqual({ outcome: "ignored", reason: "paused" });
+      expect(f.repo.takeBufferedImpulse("bp")).toBeNull();
+      expect(f.repo.historyFor({ blueprintId: "bp", limit: 100 }).filter((row) => row.outcome === "fired")).toHaveLength(1);
+    } finally { await f.close(); }
+  });
+
+  it("retains an existing approved request buffered behind a running execution while paused", async () => {
+    const scheduled = bp({ kind: "schedule", when: { schedule: "0 8 * * *", timezone: "UTC" }, guards: { runLock: "buffer" }, policy: "approval" });
+    const f = rig([scheduled]); await f.ready;
+    try {
+      const first = await f.pipeline.evaluate(impulse({ kind: "schedule", payload: { n: 0 } }));
+      const second = await f.pipeline.evaluate(impulse({ kind: "schedule", payload: { n: 1 } }));
+      if (first.outcome !== "matched" || second.outcome !== "matched") throw new Error("Expected waiting approvals");
+      const fired = await f.pipeline.resolveMatched(first.decisionId, "approve", { type: "operator", id: "jc" });
+      if (fired.outcome !== "fired") throw new Error("Expected running execution");
+      f.store.swap([{ ...scheduled, paused: true }]);
+      expect((await f.pipeline.resolveMatched(second.decisionId, "approve", { type: "operator", id: "jc" })).outcome).toBe("blocked");
+      const completion = await f.pipeline.onRunCompleted(fired.correlationId, "succeeded");
+      expect(completion?.outcome).toBe("fired");
+      expect(f.repo.getApproval(second.decisionId)?.state).toBe("approved");
+      expect(f.repo.takeBufferedImpulse("bp")).toBeNull();
+    } finally { await f.close(); }
+  });
+
+  it.each(["foreign", "cycle", "missing", "deep"] as const)("suppresses paused buffer with %s approval provenance using bounded lookup", async (mode) => {
+    const scheduled = bp({ kind: "schedule", when: { schedule: "0 8 * * *", timezone: "UTC" }, guards: { runLock: "buffer" } });
+    const f = rig([scheduled]); await f.ready;
+    try {
+      const fired = await f.pipeline.evaluate(impulse({ kind: "schedule", payload: { n: 0 } }));
+      const buffered = await f.pipeline.evaluate(impulse({ kind: "schedule", payload: { n: 1 } }));
+      if (fired.outcome !== "fired" || buffered.outcome !== "blocked") throw new Error("Expected run and buffer");
+      const lookup = f.repo.getDecision.bind(f.repo); const blocked = lookup(buffered.decisionId); if (!blocked) throw new Error("Missing blocked row");
+      let lookups = 0;
+      f.repo.getDecision = (id) => {
+        if (id === fired.decisionId) return lookup(id);
+        lookups++;
+        if (mode === "missing") return null;
+        return { ...blocked, id, blueprintId: mode === "foreign" ? "another-routine" : "bp", resolutionOf: mode === "deep" ? `ancestor-${lookups}` : id };
+      };
+      f.store.swap([{ ...scheduled, paused: true }]);
+      expect(await f.pipeline.onRunCompleted(fired.correlationId, "succeeded")).toEqual({ outcome: "ignored", reason: "paused" });
+      expect(lookups).toBeLessThanOrEqual(64); expect(f.repo.takeBufferedImpulse("bp")).toBeNull();
+    } finally { await f.close(); }
+  });
+
   it("unknown correlation is a debug no-op", async () => {
     const { pipeline, ready, close } = rig([bp()]);
     await ready;
