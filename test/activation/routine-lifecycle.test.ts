@@ -89,6 +89,23 @@ describe("canonical routine pause", () => {
     } finally { await restarted?.stop(); await f.close(); }
   }, 15000);
 
+  it("preserves owner-default timezone and pause across both handling policy changes", async () => {
+    const f = await fixture();
+    try {
+      await f.add("default-zone"); await f.change("default-zone", true);
+      const current = await f.inspect("default-zone");
+      const args = ["default-zone", "--revision", current.revision, "--schedule", current.current.schedule, "--owner-timezone"];
+      const preview = z.object({ proposedRevision: z.string() }).parse(await f.run(["routine", "schedule", "preview", ...args]));
+      await f.run(["routine", "schedule", "update", ...args, "--proposed-revision", preview.proposedRevision]);
+      for (const policy of ["auto", "approve"]) {
+        await f.run(["routine", "set-policy", "default-zone", policy]);
+        await until(() => f.daemon.store.get("default-zone")?.policy === (policy === "approve" ? "approval" : policy));
+        expect((await f.inspect("default-zone")).current).toMatchObject({ paused: true, timezone: null, policy: policy === "approve" ? "approval" : policy });
+        expect(f.daemon.scheduleStatus()).toEqual([]);
+      }
+    } finally { await f.close(); }
+  }, 15000);
+
   it("does not block unrelated lifecycle changes or reloads while A waits behind active work; queued impulses use paused state", async () => {
     const f = await fixture(); const active = deferred(); const entered = deferred(); const queued = deferred(); let work: Promise<void> | undefined; let pauseA: Promise<unknown> | undefined;
     try {

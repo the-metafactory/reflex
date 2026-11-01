@@ -116,7 +116,7 @@ export class RoutineCommands {
     const [blueprint] = parseActivationDocument(text, file);
     if (!blueprint) throw new Error("Routine must contain one activation");
     if (checkTarget && !(await this.deps.knownTargets()).includes(blueprint.target)) throw new Error(`Unknown routine target ${blueprint.target}`);
-    if (!("schedule" in blueprint.when) || !blueprint.when.timezone) throw new Error("Routine requires a schedule and timezone");
+    if (!("schedule" in blueprint.when)) throw new Error("Routine requires a schedule");
     new Intl.DateTimeFormat("en", { timeZone: blueprint.when.timezone }).format();
     new Cron(blueprint.when.schedule, { timezone: blueprint.when.timezone, paused: true }).stop();
     const files = await discoverActivationFiles(this.deps.sources);
