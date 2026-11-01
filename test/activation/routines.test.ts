@@ -169,7 +169,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
       await until(() => f.store.get(input.id)?.policy === "approval");
       expect((await remove(f.routines, input.id)).ok).toBe(true);
       await until(() => f.store.get(input.id) === undefined);
-      expect(await readdir(f.routinesDir)).toEqual([".removals", "flows"]);
+      expect((await readdir(f.routinesDir)).sort()).toEqual([".removals", "flows"]);
       expect(f.repo.historyFor({ limit: 10 })).toEqual([]);
     } finally { await f.cleanup(); }
   });
@@ -181,7 +181,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
     const f = await fixture();
     try {
       expect((await f.routines.execute("routine-add", { ...input, ...invalid }, actor)).ok).toBe(false);
-      expect(await readdir(f.routinesDir)).toEqual(["flows"]);
+      expect((await readdir(f.routinesDir)).sort()).toEqual(["flows"]);
     } finally { await f.cleanup(); }
   });
 
@@ -263,7 +263,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
     const f = await fixture();
     try {
       expect((await f.routines.execute("routine-add", { ...input, flow: "bad: yaml" }, actor)).ok).toBe(false);
-      expect(await readdir(f.routinesDir)).toEqual(["flows"]);
+      expect((await readdir(f.routinesDir)).sort()).toEqual(["flows"]);
       const flow = "name: F_TEST\nactions: [A_EXTRACT_URLS]";
       expect((await f.routines.execute("routine-add", { ...input, payload: { flow: "/outside" }, flow }, actor)).ok).toBe(false);
       await mkdir(join(f.routinesDir, "flows"), { recursive: true });
@@ -271,7 +271,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
       await writeFile(path, "unowned");
       expect((await f.routines.execute("routine-add", { ...input, flow }, actor)).ok).toBe(false);
       expect(await readFile(path, "utf8")).toBe("unowned");
-      expect(await readdir(f.routinesDir)).toEqual(["flows"]);
+      expect((await readdir(f.routinesDir)).sort()).toEqual(["flows"]);
     } finally { await f.cleanup(); }
   });
 
@@ -313,7 +313,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
       await remove(f.routines, input.id);
       const refusal = await f.routines.execute("routine-add", { ...input, policy: "auto" }, actor);
       expect(refusal).toMatchObject({ ok: false, error: { message: expect.stringContaining("Dry Run refused") } });
-      expect(await readdir(f.routinesDir)).toEqual([".removals", "flows"]);
+      expect((await readdir(f.routinesDir)).sort()).toEqual([".removals", "flows"]);
     } finally { await f.cleanup(); }
   });
 });
