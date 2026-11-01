@@ -115,6 +115,7 @@ export function loadConfig(options: LoadOptions = {}): ReflexConfig {
     activationsDir: parsed.activations_dir,
     ...(parsed.routine_target_command ? { routineTargetCommand: parsed.routine_target_command } : {}),
     routineTargetTimeoutMs: parsed.routine_target_timeout_ms,
+    routineFlowContractCommand: parsed.routine_flow_contract_command,
     routinesDir: parsed.routines_dir ?? join(parsed.activations_dir, "routines"),
     ...(parsed.state_dir !== undefined ? { stateDir: expandHome(parsed.state_dir) } : {}),
   };

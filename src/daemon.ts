@@ -2,6 +2,7 @@ import { discoverRoutineTargets } from "./activation/target-command";
 import { join, resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { RoutineCommands } from "./activation/routines";
+import { commandFlowContract } from "./activation/routine-contract";
 import { ActivationWatcher } from "./activation/watcher";
 import { discoverActivationFiles } from "./activation/sources";
 import { BlueprintStore, loadBlueprintSet } from "./activation/store";
@@ -105,6 +106,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
     store,
     schedule,
     routines: new RoutineCommands({
+      flowContract: commandFlowContract(cfg.routineFlowContractCommand),
       dir: routinesDir, sources, knownTargets: options.routineTargetLookup ?? (() => discoverRoutineTargets(cfg.routineTargetCommand, cfg.routineTargetTimeoutMs)),
       dryRun: (blueprint, actor) => pipeline.evaluateBlueprintDry(blueprint, {
         kind: blueprint.kind, blueprintId: blueprint.id, payload: blueprint.payload,

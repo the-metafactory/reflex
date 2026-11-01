@@ -102,6 +102,16 @@ New routines default to `approve`, mapped at the CLI boundary to the canonical a
 
 For an already composed flow, add `--flow-file /path/to/flow.yaml`. The CLI transmits its contents; Reflex stores a marked copy at `<routines_dir>/flows/<id>.yaml` and supplies that absolute path as `payload.flow`. Do not also supply `payload.flow`. Reflex checks the flow document's basic shape and preserves its original YAML bytes after the ownership marker, including Pulse's sovereignty and residency annotations. It validates the activation with its loader and Dry Run, installs the flow before committing the activation, and rolls back a newly created flow if activation installation fails. It removes only its own marked flow alongside its activation. Pulse remains responsible for composition, whole-flow validation and execution. Flow storage alone does not execute anything.
 
+`routine list --json` includes every scheduled activation in the configured discovery roots, including external and disabled definitions. External definitions are read-only. `routine inspect <id> --json` returns a revision and a redacted flow view when an inspection command is configured:
+
+```yaml
+routine_flow_contract_command: [pulse, routine-contract]
+```
+
+The command receives `{yaml, patches}` on stdin and returns `{view, yaml?}`. Pulse owns the editable field schema, redaction and validation. Unclassified values stay hidden. A missing command leaves inspection and editing unavailable; it does not hide the routine from inventory.
+
+`routine update <id> --revision <sha256> --patches '<json array>' --json` applies only schema-declared parameter patches to a generated, regular, owner-marked flow. A patch has a `path` array and a scalar `value`, for example `{"path":["actions",0,"retry","attempts"],"value":3}`. The revision covers activation and flow bytes. Updates serialize with existing routine writes, recheck the revision after validation and atomically replace only the flow. Schedule, policy and activation payload stay unchanged. Editing performs no Dry Run or execution. After a changed revision, refresh before retrying.
+
 ## Boundaries
 
 | Reflex does | Reflex does not |
