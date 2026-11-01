@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, stat, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Cron } from "croner";
 import { z } from "zod";
 import { discoverActivationFiles, type DiscoverOptions } from "./sources";
 import { loadBlueprintSet } from "./store";
+import type { ActivationBlueprint } from "./types";
 
 const instant = z.string().datetime({ offset: true });
 const zone = z.string().min(1).max(100).refine((value) => {
@@ -19,45 +20,54 @@ export const OccurrenceQuerySchema = z.object({
 }).strict().refine((q) => Date.parse(q.end) > Date.parse(q.start) && Date.parse(q.end) - Date.parse(q.start) <= 32 * 86400000, "Query a positive range of at most 32 days");
 const CursorSchema = z.object({ snapshot: z.string(), at: instant, id: z.string() }).strict();
 
+async function inspectOwnership(blueprint: ActivationBlueprint, dir: string, flowEditing: boolean, entriesInFile: number) {
+  const [text, fileStat] = await Promise.all([readFile(blueprint.sourceFile, "utf8"), lstat(blueprint.sourceFile)]);
+  const owned = entriesInFile === 1 && fileStat.isFile() && !fileStat.isSymbolicLink() && text.startsWith("# reflex-generated-routine: v1\n") && resolve(blueprint.sourceFile) === join(dir, `${blueprint.id}.yaml`);
+  let editParameters = false;
+  if (owned && flowEditing && text.startsWith("# reflex-generated-routine: v1\n# reflex-owned-flow: v1\n")) {
+    const expectedFlow = join(dir, "flows", `${blueprint.id}.yaml`);
+    if (blueprint.payload.flow === expectedFlow) {
+      try {
+        const flowStat = await lstat(expectedFlow);
+        editParameters = flowStat.isFile() && !flowStat.isSymbolicLink() && flowStat.size <= 1048576 && (await readFile(expectedFlow, "utf8")).startsWith(`# reflex-generated-flow: ${blueprint.id} v1\n`);
+      } catch { editParameters = false; }
+    }
+  }
+  return { readOnly: !owned, capabilities: { editParameters, editSchedule: false, pause: false, delete: owned, setPolicy: owned } };
+}
+
 export async function routineOccurrences(options: {
   sources: DiscoverOptions; dir: string; flowEditing: boolean;
   scope: { principal: string; stack: string }; args: Record<string, unknown>;
 }) {
+  const dir = resolve(options.dir);
   const query = OccurrenceQuerySchema.parse(options.args);
   if (query.principal !== options.scope.principal || query.stack !== options.scope.stack) throw new Error("Routine owner scope does not match the requested principal and stack");
   for (const source of new Set([options.sources.activationsDir, options.sources.routinesDir, options.dir].filter((value): value is string => value !== undefined))) {
     try {
-      if (!(await lstat(source)).isDirectory()) throw new Error("Not a directory");
+      if (!(await stat(source)).isDirectory()) throw new Error("Not a directory");
     } catch { throw new Error("Routine discovery is incomplete: a configured source directory is unavailable"); }
   }
   const files = await discoverActivationFiles({ ...options.sources, onWarning: () => { throw new Error("Routine discovery is incomplete: a configured source is unavailable"); } });
   const blueprints = await loadBlueprintSet(files);
   if (blueprints.length > 2000) throw new Error("Routine inventory exceeds the occurrence query limit");
   const entries = [];
-  for (const blueprint of blueprints) {
-    if (!("schedule" in blueprint.when)) continue;
-    const text = await readFile(blueprint.sourceFile, "utf8");
-    const stat = await lstat(blueprint.sourceFile);
-    const owned = stat.isFile() && !stat.isSymbolicLink() && text.startsWith("# reflex-generated-routine: v1\n") && resolve(blueprint.sourceFile) === resolve(join(options.dir, `${blueprint.id}.yaml`));
-    const timezone = blueprint.when.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-    zone.parse(timezone);
-    let editParameters = false;
-    if (owned && options.flowEditing && text.startsWith("# reflex-generated-routine: v1\n# reflex-owned-flow: v1\n")) {
-      const expectedFlow = join(options.dir, "flows", `${blueprint.id}.yaml`);
-      if (blueprint.payload.flow === expectedFlow) {
-        try {
-          const flowStat = await lstat(expectedFlow);
-          editParameters = flowStat.isFile() && !flowStat.isSymbolicLink() && flowStat.size <= 1048576 && (await readFile(expectedFlow, "utf8")).startsWith(`# reflex-generated-flow: ${blueprint.id} v1\n`);
-        } catch { editParameters = false; }
-      }
-    }
-    entries.push({
-      routineId: blueprint.id, schedule: blueprint.when.schedule, sourceTimezone: timezone,
-      lifecycle: blueprint.policy === "disabled" ? "disabled" as const : "active" as const,
-      handlingPolicy: blueprint.policy === "disabled" ? null : blueprint.policy,
-      readOnly: !owned,
-      capabilities: { editParameters, editSchedule: false, pause: false, delete: owned, setPolicy: owned },
-    });
+  const fileCounts = new Map<string, number>();
+  for (const blueprint of blueprints) fileCounts.set(blueprint.sourceFile, (fileCounts.get(blueprint.sourceFile) ?? 0) + 1);
+  const scheduled = blueprints.filter((blueprint) => "schedule" in blueprint.when);
+  for (let offset = 0; offset < scheduled.length; offset += 16) {
+    const batch = await Promise.all(scheduled.slice(offset, offset + 16).map(async (blueprint) => {
+      if (!("schedule" in blueprint.when)) throw new Error("Routine is not scheduled");
+      const timezone = blueprint.when.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+      zone.parse(timezone);
+      return {
+        routineId: blueprint.id, schedule: blueprint.when.schedule, sourceTimezone: timezone,
+        lifecycle: blueprint.policy === "disabled" ? "disabled" as const : "active" as const,
+        handlingPolicy: blueprint.policy === "disabled" ? null : blueprint.policy,
+        ...await inspectOwnership(blueprint, dir, options.flowEditing, fileCounts.get(blueprint.sourceFile) ?? 0),
+      };
+    }));
+    entries.push(...batch);
   }
   entries.sort((a, b) => a.routineId < b.routineId ? -1 : a.routineId > b.routineId ? 1 : 0);
   const snapshot = createHash("sha256").update(JSON.stringify({ entries, ...options.scope, start: query.start, end: query.end, timezone: query.timezone })).digest("hex");

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { stringify } from "yaml";
 import { Cron } from "croner";
 import { routineOccurrences } from "../../src/activation/occurrences";
@@ -75,6 +75,19 @@ describe("owner schedule occurrences", () => {
       await f.add("a", "*/2 * * * * *", "UTC", "approval", true);
       await expect(f.read({ ...input, cursor: first.nextCursor })).rejects.toThrow("changed");
       expect(before).not.toBe(await readFile(join(f.owned, "a.yaml"), "utf8"));
+    } finally { await f.cleanup(); }
+  });
+
+  it("reports editable owned flows when the configured routine directory is relative", async () => {
+    const f = await fixture();
+    try {
+      const file = await f.add("editable", "0 9 * * *", "UTC", "approval", true);
+      const flow = join(f.owned, "flows", "editable.yaml");
+      await mkdir(join(f.owned, "flows"));
+      await writeFile(flow, "# reflex-generated-flow: editable v1\nname: F_TEST\nactions: [A_TEST]\n");
+      await writeFile(file, "# reflex-generated-routine: v1\n# reflex-owned-flow: v1\n" + stringify({ schema: "metafactory/activation/v1", activations: [{ id: "editable", target: "@test/noop", when: { schedule: "0 9 * * *", timezone: "UTC" }, policy: "approval", payload: { flow } }] }));
+      const page = await routineOccurrences({ sources: f.sources, dir: relative(process.cwd(), f.owned), flowEditing: true, scope, args: query });
+      expect(page.occurrences[0]?.capabilities.editParameters).toBe(true);
     } finally { await f.cleanup(); }
   });
 
