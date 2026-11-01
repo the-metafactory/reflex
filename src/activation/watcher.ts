@@ -29,6 +29,7 @@ export class ActivationWatcher {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private rescanTimer: ReturnType<typeof setInterval> | null = null;
   private reloading = false;
+  private mutationChain: Promise<unknown> = Promise.resolve();
   private lastErrorMessage: string | null = null;
   private lastHash: string | null = null;
   private reloadCallbacks: Array<() => void> = [];
@@ -125,10 +126,16 @@ export class ActivationWatcher {
     if (this.reloading) return;
     this.reloading = true;
     try {
-      await this.reloadInner();
+      await this.serializeMutation(() => this.reloadInner());
     } finally {
       this.reloading = false;
     }
+  }
+
+  serializeMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.mutationChain.then(operation, operation);
+    this.mutationChain = next.then(() => undefined, () => undefined);
+    return next;
   }
 
   private async reloadInner(): Promise<void> {

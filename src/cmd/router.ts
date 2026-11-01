@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { routineHistory } from "../activation/history";
 import { routineOccurrences } from "../activation/occurrences";
 import { join } from "node:path";
@@ -113,6 +114,7 @@ export class CommandRouter {
           return { ok: true, data: await routineOccurrences({
             sources: { watchRoots: this.deps.cfg.watchRoots, activationsDir: this.deps.cfg.activationsDir, routinesDir: this.deps.cfg.routinesDir ?? join(this.deps.cfg.activationsDir, "routines") },
             dir: this.deps.cfg.routinesDir ?? join(this.deps.cfg.activationsDir, "routines"),
+            lifecycleApplied: (blueprint) => isDeepStrictEqual(store.get(blueprint.id), blueprint) && schedule.matches(blueprint),
             flowEditing: Boolean(this.deps.cfg.routineFlowContractCommand), scope: { principal: this.deps.cfg.principal, stack: this.deps.cfg.stack }, args,
           }) };
         } catch { return { ok: false, error: { code: "invalid-input", message: "Occurrence query unavailable: check its range, timezone, cursor, scope and configured routine sources" } }; }
@@ -126,6 +128,9 @@ export class CommandRouter {
       case "routine-schedule-inspect":
       case "routine-schedule-preview":
       case "routine-schedule-update":
+      case "routine-lifecycle-inspect":
+      case "routine-lifecycle-preview":
+      case "routine-lifecycle-update":
         if (!this.deps.routines) return { ok: false, error: { code: "internal", message: "Routine commands unavailable" } };
         return this.deps.routines.execute(command, args, actor);
       case "fire":

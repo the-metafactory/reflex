@@ -20,7 +20,7 @@ export interface Impulse {
 export type GuardReason = "idempotency" | "cooldown" | "run-lock" | "run-lock-buffered";
 
 export type EvaluateResult =
-  | { outcome: "ignored"; reason: "no-match" | "disabled" }
+  | { outcome: "ignored"; reason: "no-match" | "disabled" | "paused" }
   | { outcome: "matched"; decisionId: string; expiresAt: string }
   | { outcome: "blocked"; decisionId: string; reason: GuardReason }
   | { outcome: "fired"; decisionId: string; correlationId: string };

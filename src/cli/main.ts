@@ -145,6 +145,20 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     });
   }
 
+
+  const lifecycle = routine.command("lifecycle");
+  lifecycle.command("inspect <id>").option("--json").addOption(requestTimeoutOption()).action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {
+    await remote("routine-lifecycle-inspect", (data) => JSON.stringify(data), () => ({ id }))(id, opts, cmd);
+  });
+  for (const kind of ["preview", "update"]) {
+    const command = lifecycle.command(`${kind} <id>`).requiredOption("--revision <revision>").requiredOption("--paused <boolean>").option("--json").addOption(requestTimeoutOption());
+    if (kind === "update") command.requiredOption("--proposed-revision <revision>");
+    command.action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {
+      if (opts.paused !== "true" && opts.paused !== "false") { result = { exitCode: EXIT_DOMAIN, stdout: "", stderr: "--paused must be true or false" }; return; }
+      await remote(kind === "preview" ? "routine-lifecycle-preview" : "routine-lifecycle-update", (data) => JSON.stringify(data), () => ({ id, revision: opts.revision, paused: opts.paused === "true", ...(kind === "update" ? { proposedRevision: opts.proposedRevision } : {}) }))(id, opts, cmd);
+    });
+  }
+
   program
     .command("status")
     .description("Daemon health: blueprints, Matched Decisions awaiting approval, bus metrics.\nExample: reflex status --json")

@@ -69,7 +69,7 @@ export class ScheduleSource {
    * Invariant: job keys == schedule-blueprint ids after every sync.
    */
   sync(): void {
-    const blueprints = new Map(this.store.byKind("schedule").map((b) => [b.id, b]));
+    const blueprints = new Map(this.store.byKind("schedule").filter((b) => !b.paused).map((b) => [b.id, b]));
     for (const [id, job] of this.jobs) {
       const blueprint = blueprints.get(id);
       if (!blueprint || signatureOf(blueprint) !== job.signature) {
@@ -82,6 +82,11 @@ export class ScheduleSource {
         this.jobs.set(id, this.createJob(blueprint));
       }
     }
+  }
+
+  matches(blueprint: ActivationBlueprint): boolean {
+    const job = this.jobs.get(blueprint.id);
+    return blueprint.paused ? job === undefined : job?.signature === signatureOf(blueprint);
   }
 
   status(): ScheduleStatus[] {

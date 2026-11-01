@@ -59,6 +59,7 @@ export interface ActivationBlueprint {
   kind: ImpulseKind;
   when: WhenBlock;
   policy: ActivationPolicy;
+  paused?: boolean;
   approvalTimeoutMs: number;
   guards: ActivationGuards;
   payload: Record<string, unknown>;

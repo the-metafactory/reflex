@@ -6,7 +6,7 @@ import { z } from "zod";
 import { discoverActivationFiles, type DiscoverOptions } from "./sources";
 import { loadBlueprintSet } from "./store";
 import type { ActivationBlueprint } from "./types";
-import { storedSchedule } from "./routine-schedule";
+import { storedSchedule, storedPaused } from "./routine-schedule";
 
 const instant = z.string().datetime({ offset: true });
 const zone = z.string().min(1).max(100).refine((value) => {
@@ -36,11 +36,13 @@ async function inspectOwnership(blueprint: ActivationBlueprint, dir: string, flo
   }
   let editSchedule = false;
   if (owned) { try { storedSchedule(text); editSchedule = true; } catch { editSchedule = false; } }
-  return { readOnly: !owned, capabilities: { editParameters, editSchedule, pause: false, delete: owned, setPolicy: owned } };
+  let pause = false;
+  if (editSchedule && blueprint.policy !== "disabled") { try { storedPaused(text); pause = true; } catch { pause = false; } }
+  return { readOnly: !owned, capabilities: { editParameters, editSchedule, pause, delete: owned, setPolicy: owned } };
 }
 
 export async function routineOccurrences(options: {
-  sources: DiscoverOptions; dir: string; flowEditing: boolean;
+  sources: DiscoverOptions; dir: string; flowEditing: boolean; lifecycleApplied?: (blueprint: ActivationBlueprint) => boolean;
   scope: { principal: string; stack: string }; args: Record<string, unknown>;
 }) {
   const dir = resolve(options.dir);
@@ -65,7 +67,7 @@ export async function routineOccurrences(options: {
       zone.parse(timezone);
       return {
         routineId: blueprint.id, schedule: blueprint.when.schedule, sourceTimezone: timezone,
-        lifecycle: blueprint.policy === "disabled" ? "disabled" as const : "active" as const,
+        lifecycle: options.lifecycleApplied && !options.lifecycleApplied(blueprint) ? "unconfirmed" as const : blueprint.policy === "disabled" ? "disabled" as const : blueprint.paused ? "paused" as const : "active" as const,
         handlingPolicy: blueprint.policy === "disabled" ? null : blueprint.policy,
         ...await inspectOwnership(blueprint, dir, options.flowEditing, fileCounts.get(blueprint.sourceFile) ?? 0),
       };
@@ -107,6 +109,6 @@ export async function routineOccurrences(options: {
   return {
     owner: "reflex" as const, ...options.scope, start: query.start, end: query.end, timezone: query.timezone,
     meaning: "planned-trigger" as const, occurrences: page, complete, nextCursor,
-    counts: { scope: "page" as const, total: page.length, active: page.filter((p) => p.lifecycle === "active").length, disabled: page.filter((p) => p.lifecycle === "disabled").length },
+    counts: { scope: "page" as const, total: page.length, active: page.filter((p) => p.lifecycle === "active").length, disabled: page.filter((p) => p.lifecycle !== "active").length },
   };
 }

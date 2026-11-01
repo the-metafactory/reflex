@@ -53,6 +53,10 @@ export class Pipeline {
       await this.repo.bumpIgnored(blueprint.id, now.slice(0, 10));
       return { outcome: "ignored", reason: "disabled" };
     }
+    if (blueprint.kind === "schedule" && blueprint.paused) {
+      await this.repo.bumpIgnored(blueprint.id, now.slice(0, 10));
+      return { outcome: "ignored", reason: "paused" };
+    }
 
     if (blueprint.policy === "approval") {
       const decision = await this.repo.recordDecision({
@@ -273,6 +277,7 @@ export class Pipeline {
     if (blueprint.policy === "disabled") {
       return { wouldOutcome: "ignored", reasons: ["policy is disabled"] };
     }
+    if (blueprint.kind === "schedule" && blueprint.paused) return { wouldOutcome: "ignored", reasons: ["scheduled impulses are paused"] };
     if (blueprint.policy === "approval") {
       return { wouldOutcome: "matched", reasons: [`would wait for approval (timeout ${blueprint.approvalTimeoutMs}ms)`] };
     }
@@ -281,6 +286,10 @@ export class Pipeline {
       return { wouldOutcome: "blocked", reasons: [`would block: ${check.detail}`] };
     }
     return { wouldOutcome: "fired", reasons: [`would fire at target ${blueprint.target}`] };
+  }
+
+  serializeChange<T>(blueprintId: string, change: () => Promise<T>): Promise<T> {
+    return this.serialized(blueprintId, change);
   }
 
   private serialized<T>(blueprintId: string, fn: () => Promise<T>): Promise<T> {
