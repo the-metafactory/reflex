@@ -1,3 +1,5 @@
+import { routineOccurrences } from "../activation/occurrences";
+import { join } from "node:path";
 import type { RoutineCommands } from "../activation/routines";
 import type { BlueprintStore } from "../activation/store";
 import type { ReflexBus } from "../bus";
@@ -101,6 +103,15 @@ export class CommandRouter {
   ): Promise<HandlerResult<unknown>> {
     const { handlers, pipeline, repo, store, schedule } = this.deps;
     switch (command) {
+      case "routine-occurrences": {
+        try {
+          return { ok: true, data: await routineOccurrences({
+            sources: { watchRoots: this.deps.cfg.watchRoots, activationsDir: this.deps.cfg.activationsDir, routinesDir: this.deps.cfg.routinesDir ?? join(this.deps.cfg.activationsDir, "routines") },
+            dir: this.deps.cfg.routinesDir ?? join(this.deps.cfg.activationsDir, "routines"),
+            flowEditing: Boolean(this.deps.cfg.routineFlowContractCommand), scope: { principal: this.deps.cfg.principal, stack: this.deps.cfg.stack }, args,
+          }) };
+        } catch { return { ok: false, error: { code: "invalid-input", message: "Occurrence query unavailable: check its range, timezone, cursor, scope and configured routine sources" } }; }
+      }
       case "routine-add":
       case "routine-remove":
       case "routine-list":
