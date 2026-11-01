@@ -121,6 +121,9 @@ export class CommandRouter {
       }
       case "routine-add":
       case "routine-remove":
+      case "routine-removal-inspect":
+      case "routine-removal-status":
+      case "routine-removal-reconcile":
       case "routine-list":
       case "routine-set-policy":
       case "routine-inspect":

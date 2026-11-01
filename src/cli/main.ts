@@ -100,10 +100,19 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
         payload, policy: opts.policy === "approve" ? "approval" : opts.policy, ...(flow === undefined ? {} : { flow }), ...(opts.servesGoal ? { servesGoal: opts.servesGoal } : {}),
       }))(opts, cmd);
     });
-  routine.command("remove <id>").option("--json").addOption(requestTimeoutOption())
+  routine.command("remove <id>").requiredOption("--revision <revision>").requiredOption("--request-id <requestId>").option("--json").addOption(requestTimeoutOption())
     .action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {
-      await remote("routine-remove", (data) => JSON.stringify(data), () => ({ id }))(id, opts, cmd);
+      await remote("routine-remove", (data) => JSON.stringify(data), () => ({ id, revision: opts.revision, requestId: opts.requestId }))(id, opts, cmd);
     });
+  const removal = routine.command("removal");
+  removal.command("inspect <id>").option("--json").addOption(requestTimeoutOption()).action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {
+    await remote("routine-removal-inspect", (data) => JSON.stringify(data), () => ({ id }))(id, opts, cmd);
+  });
+  for (const kind of ["status", "reconcile"]) {
+    removal.command(`${kind} <id>`).requiredOption("--revision <revision>").requiredOption("--request-id <requestId>").option("--json").addOption(requestTimeoutOption()).action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {
+      await remote(kind === "status" ? "routine-removal-status" : "routine-removal-reconcile", (data) => JSON.stringify(data), () => ({ id, revision: opts.revision, requestId: opts.requestId }))(id, opts, cmd);
+    });
+  }
   routine.command("set-policy <id> <policy>").option("--json").addOption(requestTimeoutOption())
     .action(async (id: string, policy: string, opts: Record<string, unknown>, cmd: unknown) => {
       await remote("routine-set-policy", (data) => JSON.stringify(data), () => ({ id, policy: policy === "approve" ? "approval" : policy }))(id, policy, opts, cmd);

@@ -31,10 +31,16 @@ const value = input.patches[0]?.value ?? attempts;
 const view = {name:"F_CLI_EDIT",steps:[{path:["actions",0],action:"retry",purpose:"Sequence",parameters:[{name:"attempts",kind:"literal",value}],editable:[{name:"attempts",type:"number",minimum:1}],reason:"Retry contract"}]};
 console.log(JSON.stringify({view,...(input.patches.length ? {yaml:input.yaml.replace(/attempts: \\d+/,"attempts: "+value)} : {})}));`);
   daemon = await startDaemon({ ...cfg, activationsDir: join(dir, "activations"), routinesDir: join(dir, "routines"), routineFlowContractCommand: [process.execPath, contract] }, {
-    dbPath: join(dir, "test.db"), bus: makeBus(), routineTargetLookup: async () => ["@jc/noop"],
+    dbPath: join(dir, "test.db"), bus: makeBus(), routineTargetLookup: async () => ["@jc/noop"], routineRemovalTargetLookup: async () => [{ target: "@jc/noop", flowRoot: join(dir, "routines", "flows") }],
   });
 });
 afterAll(async () => { await daemon.stop(); await transport.close(); await rm(dir, { recursive: true, force: true }); });
+
+async function remove(id: string) {
+  const detail = await run(["routine", "removal", "inspect", id, "--json"]);
+  const { revision } = z.object({ revision: z.string() }).parse(JSON.parse(detail.stdout));
+  return run(["routine", "remove", id, "--revision", revision, "--request-id", crypto.randomUUID(), "--json"]);
+}
 
 async function waitLoaded(present: boolean) {
   const deadline = Date.now() + 5000;
@@ -65,7 +71,7 @@ describe("routine CLI through daemon command protocol", () => {
     expect(JSON.parse(test.stdout)).toMatchObject({ wouldOutcome: "matched" });
     expect((await run(["routine", "set-policy", "cli-routine", "auto", "--json"])).exitCode).toBe(0);
     expect((await run(["routine", "set-policy", "cli-routine", "approve", "--json"])).exitCode).toBe(0);
-    expect((await run(["routine", "remove", "cli-routine", "--json"])).exitCode).toBe(0);
+    expect((await remove("cli-routine")).exitCode).toBe(0);
     await waitLoaded(false);
     expect(JSON.parse((await run(["routine", "list", "--json"])).stdout)).toEqual([]);
     expect(daemon.repo.historyFor({ limit: 10 })).toEqual([]);
@@ -95,7 +101,7 @@ describe("routine CLI through daemon command protocol", () => {
     expect(JSON.parse(saved.stdout)).toMatchObject({ flow: { steps: [{ parameters: [{ name: "attempts", kind: "literal", value: 3 }] }] } });
     expect((await run(args)).exitCode).toBe(1);
     expect(daemon.repo.historyFor({ limit: 10 })).toEqual([]);
-    expect((await run(["routine", "remove", "cli-editor", "--json"])).exitCode).toBe(0);
+    expect((await remove("cli-editor")).exitCode).toBe(0);
   });
 
   it("reads scoped paginated historical decisions through the daemon without modifying them", async () => {
@@ -122,6 +128,6 @@ describe("routine CLI through daemon command protocol", () => {
     expect((await run(update)).exitCode).toBe(1);
     expect((await run(["routine", "schedule", "preview", "cli-schedule", "--revision", planned.proposedRevision, "--schedule", "invalid", "--timezone", "UTC", "--json"])).exitCode).toBe(1);
     expect(daemon.repo.historyFor({ limit: 100 })).toEqual(history);
-    expect((await run(["routine", "remove", "cli-schedule", "--json"])).exitCode).toBe(0);
+    expect((await remove("cli-schedule")).exitCode).toBe(0);
   });
 });
