@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createTransport } from "@the-metafactory/myelin";
 import { describe, it, expect } from "bun:test";
-import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, unlink, symlink, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, unlink, symlink, chmod, rename, lstat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoutineCommands } from "../../src/activation/routines";
@@ -24,7 +24,6 @@ async function fixture(knownTargets: () => Promise<readonly string[]> = async ()
   const routinesDir = join(dir, "routines");
   await mkdir(central);
   await mkdir(routinesDir);
-  await mkdir(join(routinesDir, "flows"));
   const sources = { watchRoots: [], activationsDir: central, routinesDir };
   const store = new BlueprintStore([]);
   const watcher = new ActivationWatcher(store, sources, { debounceMs: 10, rescanIntervalMs: 30 });
@@ -136,6 +135,103 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
     } finally { await f.cleanup(); }
   });
 
+  it.each(["definition", "flow", "symlink"])("preserves an external replacement captured during atomic %s staging", async (kind) => {
+    const f = await fixture();
+    try {
+      await f.routines.execute("routine-add", { ...input, flow: "name: F_TEST\nactions: [A_EXTRACT_URLS]" }, actor);
+      const file = kind !== "flow" ? join(f.routinesDir, `${input.id}.yaml`) : join(f.routinesDir, "flows", `${input.id}.yaml`);
+      const foreign = `foreign ${kind} bytes`;
+      const commands = new RoutineCommands({ dir: f.routinesDir, sources: f.sources, knownTargets: async () => [input.target], lastDecision: () => null,
+        dryRun: async () => ({ wouldOutcome: "matched", reasons: [] }), removalApplied: () => true, commitRemoval: async (_id, write) => { await write(); },
+        removalTargets: async () => [{ target: input.target, flowRoot: join(f.routinesDir, "flows") }],
+        stageRemoval: async (source, staged) => {
+          if (source === file) { await writeFile(`${source}.replacement`, foreign); if (kind === "symlink") { await unlink(source); await symlink(`${source}.replacement`, source); } else await rename(`${source}.replacement`, source); }
+          await rename(source, staged);
+        },
+      });
+      expect(await remove(commands, input.id)).toMatchObject({ ok: false, error: { code: "write-uncertain", message: expect.stringContaining("restored and preserved") } });
+      expect(await readFile(file, "utf8")).toBe(foreign);
+    } finally { await f.cleanup(); }
+  });
+
+  it("recovers a staged owned resource after a begun-write interruption", async () => {
+    const f = await fixture();
+    try {
+      await f.routines.execute("routine-add", { ...input, flow: "name: F_TEST\nactions: [A_EXTRACT_URLS]" }, actor);
+      const dependencies = { dir: f.routinesDir, sources: f.sources, knownTargets: async () => [input.target], lastDecision: () => null,
+        dryRun: async () => ({ wouldOutcome: "matched" as const, reasons: [] }), removalApplied: () => true, commitRemoval: async (_id: string, write: () => Promise<void>) => { await write(); },
+        removalTargets: async () => [{ target: input.target, flowRoot: join(f.routinesDir, "flows") }],
+      };
+      const commands = new RoutineCommands({ ...dependencies, stageRemoval: async (source, staged) => { await rename(source, staged); throw new Error("Interrupted after staging"); } });
+      const detail = await commands.execute("routine-removal-inspect", { id: input.id }, actor); if (!detail.ok) throw new Error("inspect failed");
+      const intent = { id: input.id, revision: z.object({ revision: z.string() }).parse(detail.data).revision, requestId: crypto.randomUUID() };
+      expect(await commands.execute("routine-remove", intent, actor)).toMatchObject({ ok: false, error: { code: "write-uncertain" } });
+      expect(await commands.execute("routine-removal-status", intent, actor)).toMatchObject({ ok: true, data: { status: "pending" } });
+      const restarted = new RoutineCommands(dependencies);
+      expect(await restarted.execute("routine-removal-reconcile", intent, actor)).toMatchObject({ ok: true, data: { status: "removed" } });
+      expect((await readdir(join(f.routinesDir, ".removals"))).filter((name) => name.endsWith(".removing"))).toEqual([]);
+    } finally { await f.cleanup(); }
+  });
+
+  it("retains both foreign resources when restoration cannot overwrite a replacement", async () => {
+    const f = await fixture();
+    try {
+      await f.routines.execute("routine-add", input, actor);
+      const file = join(f.routinesDir, `${input.id}.yaml`); let preserved = "";
+      const commands = new RoutineCommands({ dir: f.routinesDir, sources: f.sources, knownTargets: async () => [input.target], lastDecision: () => null,
+        dryRun: async () => ({ wouldOutcome: "matched", reasons: [] }), removalApplied: () => true, commitRemoval: async (_id, write) => { await write(); },
+        removalTargets: async () => [{ target: input.target, flowRoot: join(f.routinesDir, "flows") }],
+        stageRemoval: async (source, staged) => {
+          await writeFile(`${source}.replacement`, "first foreign bytes"); await rename(`${source}.replacement`, source); await rename(source, staged);
+          preserved = staged; await writeFile(source, "second foreign bytes");
+        },
+      });
+      expect(await remove(commands, input.id)).toMatchObject({ ok: false, error: { code: "write-uncertain", message: expect.stringContaining("restoration cannot overwrite") } });
+      expect(await readFile(file, "utf8")).toBe("second foreign bytes"); expect(await readFile(preserved, "utf8")).toBe("first foreign bytes");
+    } finally { await f.cleanup(); }
+  });
+
+  it("does not confirm absence through missing or replaced owned flow storage", async () => {
+    const f = await fixture(); const flows = join(f.routinesDir, "flows"); const moved = `${flows}-moved`;
+    try {
+      await f.routines.execute("routine-add", { ...input, flow: "name: F_TEST\nactions: [A_EXTRACT_URLS]" }, actor);
+      const result = await remove(f.routines, input.id); if (!result.ok) throw new Error("remove failed");
+      const { status: _status, ...intent } = z.object({ id: z.string(), revision: z.string(), requestId: z.string(), status: z.string() }).parse(result.data);
+      await rename(flows, moved);
+      expect(await f.routines.execute("routine-removal-status", intent, actor)).toMatchObject({ ok: false });
+      await mkdir(flows);
+      expect(await f.routines.execute("routine-removal-status", intent, actor)).toMatchObject({ ok: false, error: { message: expect.stringContaining("storage identity changed") } });
+      await rm(flows, { recursive: true }); await symlink(moved, flows);
+      expect(await f.routines.execute("routine-removal-status", intent, actor)).toMatchObject({ ok: false });
+    } finally { await f.cleanup(); }
+  });
+
+  it("refuses byte-identical recreation even when inode reuse is simulated in the old receipt", async () => {
+    const f = await fixture();
+    try {
+      await f.routines.execute("routine-add", input, actor);
+      const file = join(f.routinesDir, `${input.id}.yaml`); const original = await readFile(file, "utf8");
+      const result = await remove(f.routines, input.id); if (!result.ok) throw new Error("remove failed");
+      const { status: _status, ...intent } = z.object({ id: z.string(), revision: z.string(), requestId: z.string(), status: z.string() }).parse(result.data);
+      await Bun.sleep(2); await f.routines.execute("routine-add", input, actor); expect(await readFile(file, "utf8")).toBe(original);
+      const receiptFile = join(f.routinesDir, ".removals", `${input.id}-${intent.requestId}.json`);
+      const receipt = z.object({ definition: z.object({ ino: z.string(), dev: z.string(), birthtimeNs: z.string() }).passthrough() }).passthrough().parse(JSON.parse(await readFile(receiptFile, "utf8")));
+      const recreated = await lstat(file, { bigint: true }); expect(recreated.birthtimeNs.toString()).not.toBe(receipt.definition.birthtimeNs);
+      receipt.definition.ino = recreated.ino.toString(); receipt.definition.dev = recreated.dev.toString(); await writeFile(receiptFile, JSON.stringify(receipt));
+      expect(await f.routines.execute("routine-removal-reconcile", intent, actor)).toMatchObject({ ok: false, error: { message: expect.stringContaining("replacement") } });
+      expect(await readFile(file, "utf8")).toBe(original);
+    } finally { await f.cleanup(); }
+  });
+
+  it("deletes a no-flow routine without precreating flow storage", async () => {
+    const f = await fixture();
+    try {
+      await f.routines.execute("routine-add", input, actor);
+      expect(await Bun.file(join(f.routinesDir, "flows")).exists()).toBe(false);
+      expect(await remove(f.routines, input.id)).toMatchObject({ ok: true, data: { status: "removed" } });
+    } finally { await f.cleanup(); }
+  });
+
   it("refuses symlinked owned flows before mutation and distinguishes prewrite validation refusal", async () => {
     const f = await fixture();
     try {
@@ -169,7 +265,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
       await until(() => f.store.get(input.id)?.policy === "approval");
       expect((await remove(f.routines, input.id)).ok).toBe(true);
       await until(() => f.store.get(input.id) === undefined);
-      expect((await readdir(f.routinesDir)).sort()).toEqual([".removals", "flows"]);
+      expect((await readdir(f.routinesDir)).sort()).toEqual([".removals"]);
       expect(f.repo.historyFor({ limit: 10 })).toEqual([]);
     } finally { await f.cleanup(); }
   });
@@ -181,7 +277,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
     const f = await fixture();
     try {
       expect((await f.routines.execute("routine-add", { ...input, ...invalid }, actor)).ok).toBe(false);
-      expect((await readdir(f.routinesDir)).sort()).toEqual(["flows"]);
+      expect((await readdir(f.routinesDir)).sort()).toEqual([]);
     } finally { await f.cleanup(); }
   });
 
@@ -263,7 +359,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
     const f = await fixture();
     try {
       expect((await f.routines.execute("routine-add", { ...input, flow: "bad: yaml" }, actor)).ok).toBe(false);
-      expect((await readdir(f.routinesDir)).sort()).toEqual(["flows"]);
+      expect((await readdir(f.routinesDir)).sort()).toEqual([]);
       const flow = "name: F_TEST\nactions: [A_EXTRACT_URLS]";
       expect((await f.routines.execute("routine-add", { ...input, payload: { flow: "/outside" }, flow }, actor)).ok).toBe(false);
       await mkdir(join(f.routinesDir, "flows"), { recursive: true });
@@ -313,7 +409,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
       await remove(f.routines, input.id);
       const refusal = await f.routines.execute("routine-add", { ...input, policy: "auto" }, actor);
       expect(refusal).toMatchObject({ ok: false, error: { message: expect.stringContaining("Dry Run refused") } });
-      expect((await readdir(f.routinesDir)).sort()).toEqual([".removals", "flows"]);
+      expect((await readdir(f.routinesDir)).sort()).toEqual([".removals"]);
     } finally { await f.cleanup(); }
   });
 });
