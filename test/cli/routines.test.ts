@@ -22,7 +22,13 @@ let dir: string;
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "reflex-routine-cli-"));
-  daemon = await startDaemon({ ...cfg, activationsDir: join(dir, "activations"), routinesDir: join(dir, "routines") }, {
+  const contract = join(dir, "contract.ts");
+  await writeFile(contract, `const input = JSON.parse(await Bun.stdin.text());
+const attempts = Number(/attempts: (\\d+)/.exec(input.yaml)?.[1] ?? 2);
+const value = input.patches[0]?.value ?? attempts;
+const view = {name:"F_CLI_EDIT",steps:[{path:["actions",0],action:"retry",purpose:"Sequence",parameters:[{name:"attempts",kind:"literal",value}],editable:[{name:"attempts",type:"number",minimum:1}],reason:"Retry contract"}]};
+console.log(JSON.stringify({view,...(input.patches.length ? {yaml:input.yaml.replace(/attempts: \\d+/,"attempts: "+value)} : {})}));`);
+  daemon = await startDaemon({ ...cfg, activationsDir: join(dir, "activations"), routinesDir: join(dir, "routines"), routineFlowContractCommand: [process.execPath, contract] }, {
     dbPath: join(dir, "test.db"), bus: makeBus(), routineTargetLookup: async () => ["@jc/noop"],
   });
 });
@@ -65,5 +71,22 @@ describe("routine CLI through daemon command protocol", () => {
     expect(refusal.exitCode).toBe(1);
     expect(refusal.stderr).toContain("Unknown routine target");
     expect(JSON.parse((await run(["routine", "list", "--json"])).stdout)).toEqual([]);
+  });
+
+  it("inspects and updates through the actual daemon RPC and refuses the stale revision without firing", async () => {
+    const flow = join(dir, "edit-flow.yaml");
+    await writeFile(flow, "name: F_CLI_EDIT\nactions:\n  - retry:\n      attempts: 2\n      actions: [A_NOOP]\n");
+    expect((await run(["routine", "add", "--id", "cli-editor", "--schedule", "0 0 1 1 *", "--timezone", "UTC", "--target", "@jc/noop", "--payload", "{}", "--flow-file", flow, "--json"])).exitCode).toBe(0);
+    const inspected = await run(["routine", "inspect", "cli-editor", "--json"]);
+    expect(inspected.exitCode).toBe(0);
+    const detail: unknown = JSON.parse(inspected.stdout);
+    if (typeof detail !== "object" || detail === null || !("revision" in detail) || typeof detail.revision !== "string") throw new Error("Owner inspection did not return a revision");
+    const args = ["routine", "update", "cli-editor", "--revision", detail.revision, "--patches", JSON.stringify([{ path: ["actions", 0, "retry", "attempts"], value: 3 }]), "--json"];
+    const saved = await run(args);
+    expect(saved.exitCode).toBe(0);
+    expect(JSON.parse(saved.stdout)).toMatchObject({ flow: { steps: [{ parameters: [{ name: "attempts", kind: "literal", value: 3 }] }] } });
+    expect((await run(args)).exitCode).toBe(1);
+    expect(daemon.repo.historyFor({ limit: 10 })).toEqual([]);
+    expect((await run(["routine", "remove", "cli-editor", "--json"])).exitCode).toBe(0);
   });
 });

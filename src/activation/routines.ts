@@ -1,7 +1,9 @@
 import { mkdir, open, readFile, rename, unlink, lstat, link } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, resolve, isAbsolute } from "node:path";
 import { stringify, parse } from "yaml";
 import { z } from "zod";
+import { createHash } from "node:crypto";
+import { RoutinePatchSchema, type RoutineFlowContract } from "./routine-contract";
 import { Cron } from "croner";
 import { parseActivationDocument, ACTIVATION_SCHEMA_ID } from "./schema";
 import { discoverActivationFiles, type DiscoverOptions } from "./sources";
@@ -27,6 +29,7 @@ const flowDocument = z.object({ name: z.string().min(1), actions: z.array(z.unkn
 const flowMarker = (id: string) => `# reflex-generated-flow: ${id} v1\n`;
 const flowOwnership = "# reflex-owned-flow: v1\n";
 const marker = "# reflex-generated-routine: v1\n";
+const MAX_FLOW_BYTES = 1048576;
 
 class RoutineWriteUncertain extends Error {}
 
@@ -41,6 +44,7 @@ export interface RoutineDeps {
   knownTargets: () => Promise<readonly string[]>;
   dryRun: (blueprint: ActivationBlueprint, actor: ReflexActor) => Promise<DryRunVerdict>;
   lastDecision: (id: string) => unknown;
+  flowContract?: RoutineFlowContract;
 }
 
 export class RoutineCommands {
@@ -48,22 +52,46 @@ export class RoutineCommands {
 
   constructor(private readonly deps: RoutineDeps) {}
 
-  execute(command: "routine-add" | "routine-remove" | "routine-list" | "routine-set-policy", args: Record<string, unknown>, actor: ReflexActor): Promise<HandlerResult<unknown>> {
+  execute(command: "routine-add" | "routine-remove" | "routine-list" | "routine-set-policy" | "routine-inspect" | "routine-update", args: Record<string, unknown>, actor: ReflexActor): Promise<HandlerResult<unknown>> {
     const next = this.chain.then(async (): Promise<HandlerResult<unknown>> => {
       try {
+          const read = command === "routine-list" || command === "routine-inspect";
+          return read ? await this.run(command, args, actor) : await this.withWriteLock(idSchema.parse(args.id), () => this.run(command, args, actor));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Routine command refused";
+          return { ok: false, error: { code: error instanceof RoutineWriteUncertain ? "write-uncertain" : "invalid-input", message: message.replace(/\s+/g, " ").trim() } };
+        }
+      });
+    this.chain = next.catch(() => {});
+    return next;
+  }
+
+  private async run(command: "routine-add" | "routine-remove" | "routine-list" | "routine-set-policy" | "routine-inspect" | "routine-update", args: Record<string, unknown>, actor: ReflexActor): Promise<HandlerResult<unknown>> {
         switch (command) {
           case "routine-add": return { ok: true, data: await this.add(args, actor) };
           case "routine-remove": return { ok: true, data: await this.remove(args) };
           case "routine-list": return { ok: true, data: await this.list() };
           case "routine-set-policy": return { ok: true, data: await this.setPolicy(args, actor) };
+          case "routine-inspect": return { ok: true, data: await this.inspect(args) };
+          case "routine-update": return { ok: true, data: await this.update(args) };
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Routine command refused";
-        return { ok: false, error: { code: error instanceof RoutineWriteUncertain ? "write-uncertain" : "invalid-input", message: message.replace(/\s+/g, " ").trim() } };
-      }
+  }
+
+  private async withWriteLock<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    await mkdir(this.deps.dir, { recursive: true });
+    const file = join(this.deps.dir, `.${id}.write-lock`);
+    const handle = await open(file, "wx", 0o600).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "EEXIST") throw new Error("Another routine writer holds this routine. Retry after it finishes; an interrupted writer requires operator lock cleanup.");
+      throw error;
     });
-    this.chain = next.catch(() => {});
-    return next;
+    const identity = await handle.stat();
+    try { return await operation(); }
+    finally {
+      await handle.close();
+      const current = await lstat(file);
+      if (current.ino !== identity.ino || current.dev !== identity.dev) throw new RoutineWriteUncertain("Routine write lock ownership changed; the replacement lock was preserved.");
+      await unlink(file);
+    }
   }
 
   private file(id: string): string {
@@ -94,6 +122,7 @@ export class RoutineCommands {
     if (input.flow !== undefined) {
       flowDocument.parse(parse(input.flow));
       flow = flowMarker(input.id) + input.flow;
+      if (Buffer.byteLength(flow, "utf8") > MAX_FLOW_BYTES) throw new Error("Routine flow exceeds its UTF-8 byte size limit");
     }
     const flowFile = join(this.deps.dir, "flows", `${input.id}.yaml`);
     if (flow !== undefined && "flow" in input.payload) throw new Error("--flow-file supplies payload.flow; do not also set payload.flow");
@@ -189,18 +218,71 @@ export class RoutineCommands {
   }
 
   private async list() {
-    const files = await discoverActivationFiles({ watchRoots: [], activationsDir: this.deps.dir, onWarning: () => {} });
+    const files = await discoverActivationFiles(this.deps.sources);
     const rows = [];
-    for (const file of files) {
+    for (const blueprint of await loadBlueprintSet(files)) {
+      const file = blueprint.sourceFile;
       const text = await readFile(file, "utf8");
-      if (!text.startsWith(marker)) continue;
-      const [blueprint] = parseActivationDocument(text, file);
-      if (!blueprint) continue;
+      if (!("schedule" in blueprint.when)) continue;
       rows.push({ id: blueprint.id, schedule: "schedule" in blueprint.when ? blueprint.when.schedule : null,
-        timezone: "timezone" in blueprint.when ? blueprint.when.timezone : null,
+        timezone: "timezone" in blueprint.when ? blueprint.when.timezone ?? null : null,
         policy: blueprint.policy,
-        target: blueprint.target, lastDecision: this.deps.lastDecision(blueprint.id), file });
+        target: blueprint.target, lastDecision: this.deps.lastDecision(blueprint.id), file,
+        readOnly: !this.deps.flowContract || !text.startsWith(marker + flowOwnership) || !idSchema.safeParse(blueprint.id).success || resolve(file) !== resolve(this.file(blueprint.id)),
+      });
     }
     return rows;
+  }
+
+  private async snapshot(id: string) {
+    const files = await discoverActivationFiles(this.deps.sources);
+    const matches = [];
+    for (const file of files) {
+      const text = await readFile(file, "utf8");
+      for (const blueprint of parseActivationDocument(text, file)) if (blueprint.id === id && "schedule" in blueprint.when) matches.push({ file, text, blueprint });
+    }
+    if (matches.length !== 1) throw new Error("Routine is unavailable or has conflicting definitions");
+    const entry = matches[0];
+    if (!entry) throw new Error("Routine is unavailable");
+    const flowFile = entry.blueprint.payload.flow;
+    if (typeof flowFile !== "string" || !isAbsolute(flowFile) || !/\.ya?ml$/.exec(flowFile)) return { ...entry, yaml: null, flowFile: null, writable: false, revision: "" };
+    const stat = await lstat(flowFile);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_FLOW_BYTES) throw new Error("Routine flow is not an inspectable regular YAML file");
+    const yaml = await readFile(flowFile, "utf8");
+    const activationStat = await lstat(entry.file);
+    const writable = activationStat.isFile() && !activationStat.isSymbolicLink() && entry.text.startsWith(marker + flowOwnership) && resolve(entry.file) === resolve(this.file(id)) && resolve(flowFile) === resolve(join(this.deps.dir, "flows", `${id}.yaml`)) && yaml.startsWith(flowMarker(id));
+    const revision = createHash("sha256").update(entry.text).update("\0").update(yaml).digest("hex");
+    return { ...entry, yaml, flowFile, writable, revision };
+  }
+
+  private async inspect(args: Record<string, unknown>) {
+    const { id } = z.object({ id: idSchema }).strict().parse(args);
+    const state = await this.snapshot(id);
+    const base = { id, revision: state.revision, writable: state.writable && Boolean(this.deps.flowContract) };
+    if (!state.yaml) return { ...base, flow: null, reason: "This routine has no inspectable flow file." };
+    if (!this.deps.flowContract) return { ...base, flow: null, reason: "The owner has no configured flow inspection contract. Editing is unavailable." };
+    const result = await this.deps.flowContract(state.yaml, []);
+    return { ...base, flow: result.view, reason: state.writable ? "" : "This definition is owned outside Reflex routine storage and is read-only." };
+  }
+
+  private async update(args: Record<string, unknown>) {
+    const { id, revision, patches } = z.object({ id: idSchema, revision: z.string().regex(/^[a-f0-9]{64}$/), patches: z.array(RoutinePatchSchema).min(1).max(100) }).strict().parse(args);
+    const original = await this.snapshot(id);
+    if (!original.writable || !original.yaml || !original.flowFile || !this.deps.flowContract) throw new Error("This routine has no owner-supported update contract");
+    if (original.revision !== revision) throw new Error("Routine changed since it was opened. Refresh before applying edits.");
+    const result = await this.deps.flowContract(original.yaml, patches);
+    if (!result.yaml) throw new Error("Flow contract did not confirm a validated update");
+    if (Buffer.byteLength(result.yaml, "utf8") > MAX_FLOW_BYTES) throw new Error("Routine flow exceeds its UTF-8 byte size limit");
+    if (!result.yaml.startsWith(flowMarker(id))) throw new Error("Flow contract did not preserve ownership metadata");
+    const temporary = `${original.flowFile}.${crypto.randomUUID()}.tmp`;
+    try {
+      await Bun.write(temporary, result.yaml, { mode: 0o600 });
+      const current = await this.snapshot(id);
+      if (current.revision !== revision) throw new Error("Routine changed while validating edits. Refresh before applying edits.");
+      await writing(() => rename(temporary, original.flowFile));
+    } finally { await unlink(temporary).catch(() => {}); }
+    const installed = await this.snapshot(id);
+    if (installed.yaml !== result.yaml) throw new RoutineWriteUncertain("The owner could not verify the committed flow. Refresh before retrying.");
+    return { id, revision: installed.revision, writable: true, reason: "", flow: result.view };
   }
 }

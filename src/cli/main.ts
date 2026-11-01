@@ -109,6 +109,16 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     });
   routine.command("list").option("--json").addOption(requestTimeoutOption())
     .action(remote("routine-list", (data) => table(data as Array<Record<string, unknown>>, ["id", "schedule", "policy", "target", "lastDecision"]), () => ({})));
+  routine.command("inspect <id>").option("--json").addOption(requestTimeoutOption())
+    .action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {
+      await remote("routine-inspect", (data) => JSON.stringify(data), () => ({ id }))(id, opts, cmd);
+    });
+  routine.command("update <id>").requiredOption("--revision <revision>").requiredOption("--patches <json>").option("--json").addOption(requestTimeoutOption())
+    .action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {
+      let patches: unknown;
+      try { patches = JSON.parse(String(opts.patches)); } catch { result = { exitCode: EXIT_DOMAIN, stdout: "", stderr: "--patches must be a JSON array" }; return; }
+      await remote("routine-update", (data) => JSON.stringify(data), () => ({ id, revision: opts.revision, patches }))(id, opts, cmd);
+    });
 
   program
     .command("status")
