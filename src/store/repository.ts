@@ -1,4 +1,4 @@
-import { and, desc, eq, lte, sql } from "drizzle-orm";
+import { and, desc, eq, lt, lte, or, sql } from "drizzle-orm";
 import type { ReflexActor } from "../bus/envelopes";
 import type { ReflexDb } from "./db";
 import { approvals, decisions, firedEvents, guardState, idempotencyKeys, ignoredCounters } from "./schema";
@@ -10,6 +10,8 @@ export interface ImpulseSnapshot {
   kind: "schedule" | "manual" | "bus" | "http";
   payload: Record<string, unknown>;
   receivedAt: string;
+  routineName?: string;
+  routineTarget?: string;
 }
 
 export interface DecisionRow {
@@ -104,6 +106,17 @@ export class Repository {
       .orderBy(desc(decisions.createdAt), desc(sql`rowid`))
       .limit(filter.limit ?? 50)
       .all();
+    return rows.map(hydrateDecision);
+  }
+
+  routineHistory(filter: { blueprintId?: string; decisionId?: string; limit: number; before?: { at: string; id: string } }): DecisionRow[] {
+    const before = filter.before;
+    const rows = this.db.select().from(decisions).where(and(
+      sql`json_extract(${decisions.impulse}, '$.kind') = 'schedule'`,
+      filter.blueprintId ? eq(decisions.blueprintId, filter.blueprintId) : undefined,
+      filter.decisionId ? eq(decisions.id, filter.decisionId) : undefined,
+      before ? or(lt(decisions.createdAt, before.at), and(eq(decisions.createdAt, before.at), lt(decisions.id, before.id))) : undefined,
+    )).orderBy(desc(decisions.createdAt), desc(decisions.id)).limit(filter.limit).all();
     return rows.map(hydrateDecision);
   }
 
