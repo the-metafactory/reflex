@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { discoverRoutineTargets } from "./activation/target-command";
 import { join, resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
@@ -45,6 +46,7 @@ export interface ReflexDaemon extends ReflexDaemonHandle {
   pipeline: Pipeline;
   store: BlueprintStore;
   schedule: ScheduleSource;
+  watcher: ActivationWatcher;
   repo: Repository;
   bus: ReflexBus;
   handlers: CommandHandlers;
@@ -85,6 +87,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
   bus = options.bus ?? createReflexBus(cfg, { transport: buildNatsTransport(cfg) });
   await ensureReflexStream(bus.raw, cfg, options.streamStartup);
 
+  let stopped = false;
   const pipeline = new Pipeline({ store, repo, bus });
   const schedule = new ScheduleSource(store, pipeline);
   const handlers = new CommandHandlers(store, pipeline, repo);
@@ -107,6 +110,13 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
     schedule,
     routines: new RoutineCommands({
       flowContract: commandFlowContract(cfg.routineFlowContractCommand),
+      lifecycleApplied: (blueprint) => isDeepStrictEqual(store.get(blueprint.id), blueprint) && schedule.matches(blueprint),
+      commitLifecycle: (blueprint, write) => pipeline.serializeChange(blueprint.id, () => watcher.serializeMutation(async () => {
+        if (stopped) throw new Error("The routine owner stopped before this lifecycle change began");
+        await write();
+        store.swap([...store.current().filter((item) => item.id !== blueprint.id), blueprint]);
+        if (!stopped) schedule.sync();
+      })),
       dir: routinesDir, sources, knownTargets: options.routineTargetLookup ?? (() => discoverRoutineTargets(cfg.routineTargetCommand, cfg.routineTargetTimeoutMs)),
       dryRun: (blueprint, actor) => pipeline.evaluateBlueprintDry(blueprint, {
         kind: blueprint.kind, blueprintId: blueprint.id, payload: blueprint.payload,
@@ -125,6 +135,7 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
   // Lifecycle wiring: hot-reload syncs scheduler jobs + expires waiting
   // decisions of removed blueprints (R-102 FR-6 / CONTEXT.md).
   watcher.onReload(() => {
+    if (stopped) return;
     schedule.sync();
     void busSource.sync();
     syncHttp();
@@ -158,11 +169,11 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
       `${schedule.status().length} scheduled, principal ${cfg.principal}/${cfg.stack}`,
   );
 
-  let stopped = false;
   return {
     pipeline,
     store,
     schedule,
+    watcher,
     repo,
     bus: busRef,
     handlers,

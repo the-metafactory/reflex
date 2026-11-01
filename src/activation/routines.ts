@@ -3,7 +3,7 @@ import { join, resolve, isAbsolute } from "node:path";
 import { stringify, parse } from "yaml";
 import { z } from "zod";
 import { RoutinePatchSchema, type RoutineFlowContract } from "./routine-contract";
-import { ScheduleChangeSchema, changedScheduleText, routineRevision, scheduleProjection, storedSchedule, type ScheduleValue } from "./routine-schedule";
+import { ScheduleChangeSchema, changedScheduleText, routineRevision, scheduleProjection, storedSchedule, storedPaused, changedPausedText, type ScheduleValue } from "./routine-schedule";
 import { Cron } from "croner";
 import { parseActivationDocument, ACTIVATION_SCHEMA_ID } from "./schema";
 import { discoverActivationFiles, type DiscoverOptions } from "./sources";
@@ -31,7 +31,7 @@ const flowMarker = (id: string) => `# reflex-generated-flow: ${id} v1\n`;
 const flowOwnership = "# reflex-owned-flow: v1\n";
 const marker = "# reflex-generated-routine: v1\n";
 const MAX_FLOW_BYTES = 1048576;
-type RoutineCommand = "routine-add" | "routine-remove" | "routine-list" | "routine-set-policy" | "routine-inspect" | "routine-update" | "routine-schedule-inspect" | "routine-schedule-preview" | "routine-schedule-update";
+type RoutineCommand = "routine-add" | "routine-remove" | "routine-list" | "routine-set-policy" | "routine-inspect" | "routine-update" | "routine-schedule-inspect" | "routine-schedule-preview" | "routine-schedule-update" | "routine-lifecycle-inspect" | "routine-lifecycle-preview" | "routine-lifecycle-update";
 
 class RoutineWriteUncertain extends Error {}
 
@@ -46,25 +46,31 @@ export interface RoutineDeps {
   knownTargets: () => Promise<readonly string[]>;
   dryRun: (blueprint: ActivationBlueprint, actor: ReflexActor) => Promise<DryRunVerdict>;
   lastDecision: (id: string) => unknown;
+  lifecycleApplied?: (blueprint: ActivationBlueprint) => boolean;
+  commitLifecycle?: (blueprint: ActivationBlueprint, write: () => Promise<void>) => Promise<void>;
   flowContract?: RoutineFlowContract;
 }
 
 export class RoutineCommands {
-  private chain: Promise<unknown> = Promise.resolve();
+  private chains = new Map<string, Promise<unknown>>();
 
   constructor(private readonly deps: RoutineDeps) {}
 
   execute(command: RoutineCommand, args: Record<string, unknown>, actor: ReflexActor): Promise<HandlerResult<unknown>> {
-    const next = this.chain.then(async (): Promise<HandlerResult<unknown>> => {
+    const resource = typeof args.id === "string" ? args.id : command;
+    const previous = this.chains.get(resource) ?? Promise.resolve();
+    const next = previous.then(async (): Promise<HandlerResult<unknown>> => {
       try {
-          const read = command === "routine-list" || command === "routine-inspect" || command === "routine-schedule-inspect" || command === "routine-schedule-preview";
+          const read = command === "routine-list" || command === "routine-inspect" || command === "routine-schedule-inspect" || command === "routine-schedule-preview" || command === "routine-lifecycle-inspect" || command === "routine-lifecycle-preview";
           return read ? await this.run(command, args, actor) : await this.withWriteLock(idSchema.parse(args.id), () => this.run(command, args, actor));
         } catch (error) {
           const message = error instanceof Error ? error.message : "Routine command refused";
           return { ok: false, error: { code: error instanceof RoutineWriteUncertain ? "write-uncertain" : "invalid-input", message: message.replace(/\s+/g, " ").trim() } };
         }
       });
-    this.chain = next.catch(() => {});
+    const tail = next.then(() => undefined, () => undefined);
+    this.chains.set(resource, tail);
+    void tail.then(() => { if (this.chains.get(resource) === tail) this.chains.delete(resource); });
     return next;
   }
 
@@ -79,6 +85,9 @@ export class RoutineCommands {
           case "routine-schedule-inspect": return { ok: true, data: await this.inspectSchedule(args) };
           case "routine-schedule-preview": return { ok: true, data: await this.previewSchedule(args) };
           case "routine-schedule-update": return { ok: true, data: await this.updateSchedule(args) };
+          case "routine-lifecycle-inspect": return { ok: true, data: await this.inspectLifecycle(args) };
+          case "routine-lifecycle-preview": return { ok: true, data: (await this.prepareLifecycle(args)).reply };
+          case "routine-lifecycle-update": return { ok: true, data: await this.updateLifecycle(args) };
         }
   }
 
@@ -107,13 +116,13 @@ export class RoutineCommands {
     const [blueprint] = parseActivationDocument(text, file);
     if (!blueprint) throw new Error("Routine must contain one activation");
     if (checkTarget && !(await this.deps.knownTargets()).includes(blueprint.target)) throw new Error(`Unknown routine target ${blueprint.target}`);
-    if (!("schedule" in blueprint.when) || !blueprint.when.timezone) throw new Error("Routine requires a schedule and timezone");
+    if (!("schedule" in blueprint.when)) throw new Error("Routine requires a schedule");
     new Intl.DateTimeFormat("en", { timeZone: blueprint.when.timezone }).format();
     new Cron(blueprint.when.schedule, { timezone: blueprint.when.timezone, paused: true }).stop();
     const files = await discoverActivationFiles(this.deps.sources);
     const existing = await loadBlueprintSet(files.filter((path) => !replacing || resolve(path) !== resolve(file)));
     mergeBlueprints([existing, [blueprint]]);
-    const verdict = await this.deps.dryRun(blueprint, actor);
+    const verdict = await this.deps.dryRun(blueprint.paused ? { ...blueprint, paused: false } : blueprint, actor);
     if (verdict.wouldOutcome !== "matched" && verdict.wouldOutcome !== "fired") {
       throw new Error(`Dry Run refused routine ${blueprint.id}: ${verdict.reasons.join("; ")}`);
     }
@@ -234,10 +243,10 @@ export class RoutineCommands {
       catch { editSchedule = false; }
       rows.push({ id: blueprint.id, schedule: "schedule" in blueprint.when ? blueprint.when.schedule : null,
         timezone: "timezone" in blueprint.when ? blueprint.when.timezone ?? null : null,
-        policy: blueprint.policy,
+        policy: blueprint.policy, paused: blueprint.paused ?? false, runtimeConfirmed: this.deps.lifecycleApplied?.(blueprint) ?? false,
         target: blueprint.target, lastDecision: this.deps.lastDecision(blueprint.id), file,
         readOnly: !this.deps.flowContract || !text.startsWith(marker + flowOwnership) || !idSchema.safeParse(blueprint.id).success || resolve(file) !== resolve(this.file(blueprint.id)),
-        capabilities: { editSchedule },
+        capabilities: { editSchedule, pause: editSchedule && blueprint.policy !== "disabled" && Boolean(this.deps.commitLifecycle && this.deps.lifecycleApplied) },
       });
     }
     return rows;
@@ -327,6 +336,61 @@ export class RoutineCommands {
       const at = Date.now();
       return { id: input.id, revision: installed.revision, at: new Date(at).toISOString(), writable: installed.scheduleWritable, reason: installed.scheduleReason, current: scheduleProjection(installed.current, at) };
     });
+  }
+
+  private async lifecycleState(id: string) {
+    const state = await this.scheduleState(id);
+    const paused = storedPaused(state.text);
+    const writable = state.scheduleWritable && state.blueprint.policy !== "disabled" && Boolean(this.deps.commitLifecycle && this.deps.lifecycleApplied);
+    const reason = state.blueprint.policy === "disabled" ? "This definition is disabled; its previous handling policy is unknown. Pause and Resume are unavailable." : state.scheduleReason;
+    return { ...state, paused, runtimeConfirmed: this.deps.lifecycleApplied?.(state.blueprint) ?? false, lifecycleWritable: writable, lifecycleReason: reason || (!this.deps.commitLifecycle || !this.deps.lifecycleApplied ? "This owner has no runtime lifecycle commit contract." : "") };
+  }
+
+  private lifecycleReply(state: Awaited<ReturnType<RoutineCommands["lifecycleState"]>>) {
+    return { id: state.blueprint.id, revision: state.revision, writable: state.lifecycleWritable, reason: state.lifecycleReason, runtimeConfirmed: state.runtimeConfirmed,
+      current: { paused: state.paused, policy: state.blueprint.policy, ...state.current } };
+  }
+
+  private async inspectLifecycle(args: Record<string, unknown>) {
+    const { id } = z.object({ id: idSchema }).strict().parse(args);
+    return this.lifecycleReply(await this.lifecycleState(id));
+  }
+
+  private async prepareLifecycle(args: Record<string, unknown>) {
+    const input = z.object({ id: idSchema, revision: z.string().regex(/^[a-f0-9]{64}$/), paused: z.boolean() }).strict().parse(args);
+    const state = await this.lifecycleState(input.id);
+    if (!state.lifecycleWritable) throw new Error(state.lifecycleReason);
+    if (!state.runtimeConfirmed) throw new Error("The live scheduling state is not confirmed yet. Refresh after the owner reloads.");
+    if (state.revision !== input.revision) throw new Error("Routine changed since it was opened. Refresh before changing its pause state.");
+    const text = changedPausedText(state.text, input.paused);
+    const [blueprint] = parseActivationDocument(text, state.file);
+    if (!blueprint || blueprint.id !== input.id) throw new Error("The lifecycle edit changed routine identity");
+    return { input, state, text, blueprint, reply: { ...this.lifecycleReply(state), proposedRevision: routineRevision(text, state.yaml), paused: input.paused } };
+  }
+
+  private async updateLifecycle(args: Record<string, unknown>) {
+    const { proposedRevision, ...input } = z.object({ id: idSchema, revision: z.string().regex(/^[a-f0-9]{64}$/), paused: z.boolean(), proposedRevision: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(args);
+    const prepared = await this.prepareLifecycle(input);
+    if (prepared.reply.proposedRevision !== proposedRevision) throw new Error("The confirmed lifecycle preview does not match this update");
+    const temporary = `${prepared.state.file}.${crypto.randomUUID()}.tmp`;
+    let committed = false;
+    const write = async () => {
+      const current = await this.snapshot(input.id);
+      if (current.revision !== input.revision) throw new Error("Routine changed while preparing pause state. Refresh before applying it.");
+      await writing(() => rename(temporary, prepared.state.file));
+      committed = true;
+    };
+    try {
+      await Bun.write(temporary, prepared.text, { mode: 0o600 });
+      if (this.deps.commitLifecycle) await this.deps.commitLifecycle(prepared.blueprint, write);
+      else await write();
+      const installed = await this.lifecycleState(input.id);
+      if (installed.revision !== proposedRevision || installed.paused !== input.paused || !installed.runtimeConfirmed) throw new RoutineWriteUncertain("The owner could not verify the committed pause state. Check the same change again.");
+      return this.lifecycleReply(installed);
+    } catch (error) {
+      if (committed) throw new RoutineWriteUncertain(error instanceof Error ? error.message : "Lifecycle readback is unconfirmed");
+      throw error;
+    } finally { await unlink(temporary).catch(() => {}); }
   }
 
   private async update(args: Record<string, unknown>) {

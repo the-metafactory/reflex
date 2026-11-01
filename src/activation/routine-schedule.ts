@@ -35,7 +35,7 @@ function source(text: string) {
   const zone = when.get("timezone", true);
   const timezone = zone === undefined ? null : scalar(zone);
   if (when.anchor || entry.anchor || activations.anchor || map(document.contents).anchor) throw new Error("Shared YAML mappings cannot be edited safely");
-  return { document, when, schedule, timezone };
+  return { document, entry, when, schedule, timezone };
 }
 
 export function storedSchedule(text: string): ScheduleValue {
@@ -63,21 +63,22 @@ export function scheduleProjection(value: ScheduleValue, at: number) {
 
 interface SourceEdit { start: number; end: number; value: string }
 
-function insertTimezone(text: string, when: YAMLMap, schedule: Scalar<string>, timezone: string): SourceEdit {
-  if (!when.range || !schedule.range) throw new Error("Timezone insertion point is unavailable");
-  if (when.flow) {
-    const end = when.range[1] - 1;
+function insertField(text: string, mapping: YAMLMap, name: string, value: string): SourceEdit {
+  if (!mapping.range) throw new Error("Field insertion point is unavailable");
+  if (mapping.flow) {
+    const end = mapping.range[1] - 1;
     if (text[end] !== "}") throw new Error("Inline schedule cannot be safely extended");
-    return { start: end, end, value: `, timezone: ${JSON.stringify(timezone)}` };
+    return { start: end, end, value: `, ${name}: ${value}` };
   }
-  const pair = when.items.find((item) => isScalar(item.key) && item.key.value === "schedule");
+  const pair = mapping.items[0];
   if (!pair || !isScalar(pair.key) || !pair.key.range) throw new Error("Schedule indentation is unavailable");
-  const indent = text.slice(text.lastIndexOf("\n", pair.key.range[0]) + 1, pair.key.range[0]);
-  if (!/^ *$/.exec(indent)) throw new Error("Schedule indentation cannot be safely preserved");
-  const rangeEnd = when.range[2];
+  const prefix = text.slice(text.lastIndexOf("\n", pair.key.range[0]) + 1, pair.key.range[0]);
+  if (!/^ *(?:- +)?$/.exec(prefix)) throw new Error("Schedule indentation cannot be safely preserved");
+  const indent = " ".repeat(prefix.length);
+  const rangeEnd = mapping.range[2];
   const line = text.lastIndexOf("\n", rangeEnd - 1) + 1;
   const end = /^ *$/.exec(text.slice(line, rangeEnd)) ? line : rangeEnd;
-  return { start: end, end, value: `${text[end - 1] === "\n" ? "" : "\n"}${indent}timezone: ${JSON.stringify(timezone)}\n` };
+  return { start: end, end, value: `${text[end - 1] === "\n" ? "" : "\n"}${indent}${name}: ${value}\n` };
 }
 
 function removeTimezone(text: string, when: YAMLMap, timezone: Scalar<string>): SourceEdit {
@@ -118,7 +119,7 @@ export function changedScheduleText(text: string, value: ScheduleValue): string 
     if (timezone && value.timezone !== null) {
       if (!timezone.range) throw new Error("Timezone source range is unavailable");
       edits.push({ start: timezone.range[0], end: timezone.range[1], value: JSON.stringify(value.timezone) });
-    } else if (value.timezone !== null) edits.push(insertTimezone(text, when, schedule, value.timezone));
+    } else if (value.timezone !== null) edits.push(insertField(text, when, "timezone", JSON.stringify(value.timezone)));
     else if (timezone) edits.push(removeTimezone(text, when, timezone));
   }
   let next = text;
@@ -126,5 +127,32 @@ export function changedScheduleText(text: string, value: ScheduleValue): string 
   const actual = source(next);
   if (actual.schedule.value !== value.schedule || (actual.timezone?.value ?? null) !== value.timezone) throw new Error("The proposed schedule could not be preserved exactly");
   assertScheduleOnlyChange(original.document.toJS(), actual.document.toJS());
+  return next;
+}
+
+export function storedPaused(text: string): boolean {
+  const value = source(text).entry.get("paused", true);
+  if (value === undefined) return false;
+  if (!isScalar(value) || typeof value.value !== "boolean" || value.anchor || value.tag || !value.range) throw new Error("Pause state uses an unsupported scalar");
+  return value.value;
+}
+
+export function changedPausedText(text: string, paused: boolean): string {
+  const original = source(text); const value = original.entry.get("paused", true);
+  storedPaused(text);
+  let edit: SourceEdit;
+  if (value === undefined) edit = insertField(text, original.entry, "paused", String(paused));
+  else {
+    if (!isScalar(value) || !value.range) throw new Error("Pause state source range is unavailable");
+    edit = { start: value.range[0], end: value.range[1], value: String(paused) };
+  }
+  const next = text.slice(0, edit.start) + edit.value + text.slice(edit.end);
+  const withoutPaused = (document: unknown) => {
+    const parsed = documentShape.parse(document); const entry = parsed.activations[0];
+    if (!entry) throw new Error("Routine activation is unavailable");
+    const { paused: _paused, ...unchanged } = entry;
+    return { ...parsed, activations: [unchanged] };
+  };
+  if (storedPaused(next) !== paused || !isDeepStrictEqual(withoutPaused(original.document.toJS()), withoutPaused(source(next).document.toJS()))) throw new Error("The lifecycle edit would change unrelated routine values");
   return next;
 }

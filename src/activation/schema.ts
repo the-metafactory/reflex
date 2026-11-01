@@ -141,6 +141,7 @@ const entrySchema = z
     serves: servesSchema.optional(),
     when: whenSchema,
     policy: z.enum(["auto", "approval", "disabled"]).default("auto"),
+    paused: z.boolean().optional(),
     approval_timeout: durationSchema.default("1h"),
     guards: z
       .object({
@@ -151,7 +152,8 @@ const entrySchema = z
       .default({}),
     payload: z.record(z.unknown()).default({}),
   })
-  .strict();
+  .strict()
+  .refine((entry) => entry.paused === undefined || "schedule" in entry.when, { path: ["paused"], message: "paused is supported only for scheduled activations" });
 
 const documentSchema = z
   .object({
@@ -214,6 +216,7 @@ export function parseActivationDocument(text: string, sourceFile: string): Activ
       kind,
       when: normalizeWhen(entry.when as Record<string, unknown>, kind),
       policy: entry.policy,
+      ...(entry.paused !== undefined ? { paused: entry.paused } : {}),
       approvalTimeoutMs: entry.approval_timeout,
       guards: {
         ...(entry.guards.cooldown !== undefined ? { cooldownMs: entry.guards.cooldown } : {}),
