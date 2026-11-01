@@ -1,3 +1,4 @@
+import { routineHistory } from "../activation/history";
 import { routineOccurrences } from "../activation/occurrences";
 import { join } from "node:path";
 import type { RoutineCommands } from "../activation/routines";
@@ -103,6 +104,10 @@ export class CommandRouter {
   ): Promise<HandlerResult<unknown>> {
     const { handlers, pipeline, repo, store, schedule } = this.deps;
     switch (command) {
+      case "routine-history": {
+        try { return { ok: true, data: routineHistory(repo, { principal: this.deps.cfg.principal, stack: this.deps.cfg.stack }, store, args) }; }
+        catch { return { ok: false, error: { code: "invalid-input", message: "Routine history unavailable: check scope, routine, limit and cursor" } }; }
+      }
       case "routine-occurrences": {
         try {
           return { ok: true, data: await routineOccurrences({

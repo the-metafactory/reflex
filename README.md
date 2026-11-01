@@ -136,3 +136,11 @@ The response identifies the owner, principal, stack and query window. Each occur
 `counts.scope: page` means counts cover only the returned page. For a dense schedule, `complete: false` and `nextCursor` require another request with the same window and `--cursor <nextCursor>`. Do not present page counts as whole-window totals. A changed inventory or window invalidates the cursor. Missing sources, invalid input and owner failures return a refusal, not an empty calendar. The query uses the scheduler's Croner `nextRun` rules, including its supported second-field intervals and DST behavior. It adds no elapsed-duration scheduler.
 
 `--principal` and `--stack` can pin the expected owner scope. They default to the CLI configuration and must match the daemon. The query exposes no activation payloads, local paths or execution outcomes.
+
+### Decision history for execution evidence
+
+`reflex routine history --routine-id example --limit 25 --json` reads a bounded page of scheduled routine decisions from the configured instance. Omit `--routine-id` for stack activity, including removed definitions. `--decision-id` reads an exact historical decision. `--cursor` continues a page; changing the routine or scope refuses that cursor. Page size is 1–100. `--principal` and `--stack` default to CLI configuration and must match the daemon.
+
+Records expose decision, approval and dispatch correlation IDs without impulse payloads or file paths. A fired decision means dispatch, not successful execution. The configured execution owner supplies running or terminal evidence using these exact IDs. The query does not execute a routine.
+
+`routine add --name "Example routine"` stores a display name in the definition. New decisions retain that name and target in the existing decision snapshot, so removing the definition preserves historical identity. Legacy decisions without a snapshot use the recorded routine ID and label that name source explicitly. Existing decision retention is unchanged.

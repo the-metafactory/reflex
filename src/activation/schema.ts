@@ -136,6 +136,7 @@ const entrySchema = z
     id: z
       .string()
       .regex(/^[a-z0-9][a-z0-9-]*$/, { message: "id must be a lowercase slug ([a-z0-9-])" }),
+    name: z.string().trim().min(1).max(300).optional(),
     target: z.string().min(1),
     serves: servesSchema.optional(),
     when: whenSchema,
@@ -207,6 +208,7 @@ export function parseActivationDocument(text: string, sourceFile: string): Activ
     const kind = kindOf(entry.when as Record<string, unknown>);
     return {
       id: entry.id,
+      ...(entry.name ? { name: entry.name } : {}),
       target: entry.target,
       ...(entry.serves !== undefined ? { serves: entry.serves } : {}),
       kind,

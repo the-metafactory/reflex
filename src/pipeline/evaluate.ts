@@ -58,7 +58,7 @@ export class Pipeline {
       const decision = await this.repo.recordDecision({
         blueprintId: blueprint.id,
         outcome: "matched",
-        impulse: snapshot(impulse),
+        impulse: snapshot(impulse, blueprint),
         correlationId: impulse.sourceEnvelope?.correlationId,
       });
       const expiresAt = new Date(Date.parse(now) + blueprint.approvalTimeoutMs).toISOString();
@@ -88,13 +88,13 @@ export class Pipeline {
       const decision = await this.repo.recordDecision({
         blueprintId: blueprint.id,
         outcome: "blocked",
-        impulse: snapshot(impulse),
+        impulse: snapshot(impulse, blueprint),
         guardBlockReason: check.reason,
         resolutionOf: causationId,
         correlationId: impulse.sourceEnvelope?.correlationId,
       });
       if (check.reason === "run-lock-buffered") {
-        await this.repo.putBufferedImpulse(blueprint.id, snapshot(impulse), decision.id);
+        await this.repo.putBufferedImpulse(blueprint.id, snapshot(impulse, blueprint), decision.id);
       }
       await this.bus.publishDecision({
         outcome: "blocked",
@@ -113,7 +113,7 @@ export class Pipeline {
     const decision = await this.repo.recordDecision({
       blueprintId: blueprint.id,
       outcome: "fired",
-      impulse: snapshot(impulse),
+      impulse: snapshot(impulse, blueprint),
       resolutionOf: causationId,
       correlationId,
     });
@@ -302,8 +302,8 @@ export class Pipeline {
   }
 }
 
-function snapshot(impulse: Impulse) {
-  return { kind: impulse.kind, payload: impulse.payload, receivedAt: impulse.receivedAt };
+function snapshot(impulse: Impulse, blueprint: ActivationBlueprint) {
+  return { kind: impulse.kind, payload: impulse.payload, receivedAt: impulse.receivedAt, routineName: blueprint.name ?? blueprint.id, routineTarget: blueprint.target };
 }
 
 function impulseFromSnapshot(

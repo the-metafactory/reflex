@@ -52,6 +52,7 @@ export interface ActivationGuards {
 
 export interface ActivationBlueprint {
   id: string;
+  name?: string;
   target: string;
   /** Goal and/or node IDs served by the resulting Activated Run. */
   serves?: { goal?: string; node?: string };

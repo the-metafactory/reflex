@@ -72,6 +72,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
   const routine = program.command("routine").description("Install and manage Reflex-owned scheduled routines");
   routine.command("add")
     .requiredOption("--id <id>")
+    .option("--name <name>", "Routine display name retained in history")
     .requiredOption("--schedule <expression>")
     .requiredOption("--timezone <iana>")
     .requiredOption("--target <target>")
@@ -95,7 +96,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
         }
       }
       await remote("routine-add", (data) => JSON.stringify(data), () => ({
-        id: opts.id, schedule: opts.schedule, timezone: opts.timezone, target: opts.target,
+        id: opts.id, ...(opts.name ? { name: opts.name } : {}), schedule: opts.schedule, timezone: opts.timezone, target: opts.target,
         payload, policy: opts.policy === "approve" ? "approval" : opts.policy, ...(flow === undefined ? {} : { flow }), ...(opts.servesGoal ? { servesGoal: opts.servesGoal } : {}),
       }))(opts, cmd);
     });
@@ -114,6 +115,12 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
       const cfg = io.cfg ?? loadConfig();
       const query = opts as Record<string, unknown>;
       return { principal: query.principal ?? cfg.principal, stack: query.stack ?? cfg.stack, start: query.start, end: query.end, timezone: query.timezone, limit: Number(query.limit), ...(query.cursor ? { cursor: query.cursor } : {}) };
+    }));
+  routine.command("history").option("--principal <principal>").option("--stack <stack>").option("--routine-id <id>").option("--decision-id <id>").option("--limit <count>", "Page size, at most 100", "25").option("--cursor <cursor>").option("--json").addOption(requestTimeoutOption())
+    .action(remote("routine-history", (data) => JSON.stringify(data), ({ opts }) => {
+      const cfg = io.cfg ?? loadConfig();
+      const query = opts as Record<string, unknown>;
+      return { principal: query.principal ?? cfg.principal, stack: query.stack ?? cfg.stack, limit: Number(query.limit), ...(query.routineId ? { routineId: query.routineId } : {}), ...(query.decisionId ? { decisionId: query.decisionId } : {}), ...(query.cursor ? { cursor: query.cursor } : {}) };
     }));
   routine.command("inspect <id>").option("--json").addOption(requestTimeoutOption())
     .action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {

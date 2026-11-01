@@ -96,4 +96,14 @@ describe("routine CLI through daemon command protocol", () => {
     expect(daemon.repo.historyFor({ limit: 10 })).toEqual([]);
     expect((await run(["routine", "remove", "cli-editor", "--json"])).exitCode).toBe(0);
   });
+
+  it("reads scoped paginated historical decisions through the daemon without modifying them", async () => {
+    const decision = daemon.repo.recordDecision({ blueprintId: "historical-fixture", outcome: "fired", correlationId: crypto.randomUUID(), impulse: { kind: "schedule", payload: { private: "fixture-only" }, receivedAt: new Date().toISOString(), routineName: "Recorded fixture" } });
+    const history = await run(["routine", "history", "--routine-id", "historical-fixture", "--limit", "1", "--json"]);
+    expect(history.exitCode).toBe(0);
+    expect(JSON.parse(history.stdout)).toMatchObject({ owner: "reflex", principal: cfg.principal, stack: cfg.stack, complete: true, records: [{ decisionId: decision.id, correlationId: decision.correlationId, routineName: "Recorded fixture", definitionPresent: false }] });
+    expect(history.stdout).not.toContain("fixture-only");
+    expect((await run(["routine", "history", "--stack", "foreign", "--json"])).exitCode).toBe(1);
+    expect((await run(["routine", "history", "--limit", "101", "--json"])).exitCode).toBe(1);
+  });
 });

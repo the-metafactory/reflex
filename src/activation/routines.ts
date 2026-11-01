@@ -17,6 +17,7 @@ const idSchema = z.string().max(100).regex(/^[a-z0-9][a-z0-9-]*$/);
 const policySchema = z.enum(["approval", "auto"]);
 const addSchema = z.object({
   id: idSchema,
+  name: z.string().trim().min(1).max(300).optional(),
   schedule: z.string().min(1),
   timezone: z.string().min(1),
   target: z.string().min(1),
@@ -127,7 +128,7 @@ export class RoutineCommands {
     const flowFile = join(this.deps.dir, "flows", `${input.id}.yaml`);
     if (flow !== undefined && "flow" in input.payload) throw new Error("--flow-file supplies payload.flow; do not also set payload.flow");
     const text = marker + (flow === undefined ? "" : flowOwnership) + stringify({ schema: ACTIVATION_SCHEMA_ID, activations: [{
-      id: input.id, target: input.target, when: { schedule: input.schedule, timezone: input.timezone },
+      id: input.id, ...(input.name ? { name: input.name } : {}), target: input.target, when: { schedule: input.schedule, timezone: input.timezone },
       policy: input.policy, payload: flow === undefined ? input.payload : { ...input.payload, flow: flowFile },
       ...(input.servesGoal ? { serves: { goal: input.servesGoal } } : {}),
     }] });
