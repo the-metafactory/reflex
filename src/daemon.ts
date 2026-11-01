@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { discoverRoutineTargets } from "./activation/target-command";
+import { discoverRoutineTargets, discoverRoutineRemovalTargets } from "./activation/target-command";
 import { join, resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { RoutineCommands } from "./activation/routines";
@@ -22,6 +22,7 @@ import { dbPathFor } from "./store/paths";
 import { Repository } from "./store/repository";
 
 export interface DaemonOptions {
+  routineRemovalTargetLookup?: () => Promise<readonly { target: string; flowRoot: string }[]>;
   routineTargetLookup?: () => Promise<readonly string[]>;
   /** Override DB path (tests). Default: `cfg.stateDir`, else the XDG state path. */
   dbPath?: string;
@@ -111,6 +112,18 @@ export async function startDaemon(cfg: ReflexConfig, options: DaemonOptions = {}
     routines: new RoutineCommands({
       flowContract: commandFlowContract(cfg.routineFlowContractCommand),
       lifecycleApplied: (blueprint) => isDeepStrictEqual(store.get(blueprint.id), blueprint) && schedule.matches(blueprint),
+      removalTargets: options.routineRemovalTargetLookup ?? (() => discoverRoutineRemovalTargets(cfg.routineTargetCommand, cfg.routineTargetTimeoutMs)),
+      removalApplied: (id) => !store.get(id) && !schedule.status().some((job) => job.blueprintId === id) && !repo.listWaiting().some((row) => row.decision.blueprintId === id),
+      commitRemoval: (id, write) => pipeline.serializeChange(id, () => watcher.serializeMutation(async () => {
+        if (stopped) throw new Error("The routine owner stopped before removal began");
+        try { await write(); }
+        finally {
+          if (!await Bun.file(join(routinesDir, `${id}.yaml`)).exists()) {
+            store.swap(store.current().filter((item) => item.id !== id));
+            if (!stopped) schedule.sync();
+          }
+        }
+      })),
       commitLifecycle: (blueprint, write) => pipeline.serializeChange(blueprint.id, () => watcher.serializeMutation(async () => {
         if (stopped) throw new Error("The routine owner stopped before this lifecycle change began");
         await write();
