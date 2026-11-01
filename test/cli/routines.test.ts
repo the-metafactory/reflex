@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { mkdtemp, rm, writeFile, access } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTransport } from "@the-metafactory/myelin";
@@ -22,6 +22,7 @@ let dir: string;
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "reflex-routine-cli-"));
+  await mkdir(join(dir, "activations"));
   const contract = join(dir, "contract.ts");
   await writeFile(contract, `const input = JSON.parse(await Bun.stdin.text());
 const attempts = Number(/attempts: (\\d+)/.exec(input.yaml)?.[1] ?? 2);
@@ -53,6 +54,12 @@ describe("routine CLI through daemon command protocol", () => {
     expect(JSON.parse(list.stdout)).toMatchObject([{ id: "cli-routine", policy: "approval" }]);
     const routines = await run(["routine", "list", "--json"]);
     expect(JSON.parse(routines.stdout)).toMatchObject([{ id: "cli-routine", policy: "approval", lastDecision: null }]);
+    const calendar = await run(["routine", "occurrences", "--start", "2027-12-31T00:00:00Z", "--end", "2028-01-02T00:00:00Z", "--timezone", "Europe/Zurich", "--json"]);
+    expect(calendar.exitCode).toBe(0);
+    expect(JSON.parse(calendar.stdout)).toMatchObject({ owner: "reflex", principal: cfg.principal, stack: cfg.stack, complete: true, occurrences: [{ routineId: "cli-routine", scheduledFor: "2027-12-31T23:00:00.000Z" }] });
+    expect(daemon.repo.historyFor({ limit: 10 })).toEqual([]);
+    const invalidCalendar = await run(["routine", "occurrences", "--start", "bad", "--end", "bad", "--timezone", "UTC", "--json"]);
+    expect(invalidCalendar.exitCode).toBe(1);
     const test = await run(["test", "cli-routine", "--json"]);
     expect(JSON.parse(test.stdout)).toMatchObject({ wouldOutcome: "matched" });
     expect((await run(["routine", "set-policy", "cli-routine", "auto", "--json"])).exitCode).toBe(0);

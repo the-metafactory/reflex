@@ -126,3 +126,13 @@ The command receives `{yaml, patches}` on stdin and returns `{view, yaml?}`. Pul
 ## Stack
 
 TypeScript + Bun · NATS JetStream (CloudEvents v1.0, DD-68) · SQLite + Drizzle · zod
+
+## Scheduled occurrence queries
+
+`reflex routine occurrences --start <ISO instant> --end <ISO instant> --timezone <IANA zone> --limit 200 --json` reads planned triggers from the configured daemon. It does not evaluate or execute a routine. The range includes its start and excludes its end, with a maximum span of 32 days and a page size from 1 to 1000.
+
+The response identifies the owner, principal, stack and query window. Each occurrence includes its routine ID, scheduled instant, source timezone, lifecycle, handling policy and write capabilities. External definitions stay read-only. Disabled entries remain visible but do not contribute to active counts. `meaning: planned-trigger` does not establish dispatch or execution.
+
+`counts.scope: page` means counts cover only the returned page. For a dense schedule, `complete: false` and `nextCursor` require another request with the same window and `--cursor <nextCursor>`. Do not present page counts as whole-window totals. A changed inventory or window invalidates the cursor. Missing sources, invalid input and owner failures return a refusal, not an empty calendar. The query uses the scheduler's Croner `nextRun` rules, including its supported second-field intervals and DST behavior. It adds no elapsed-duration scheduler.
+
+`--principal` and `--stack` can pin the expected owner scope. They default to the CLI configuration and must match the daemon. The query exposes no activation payloads, local paths or execution outcomes.

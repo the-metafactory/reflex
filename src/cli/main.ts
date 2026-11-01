@@ -109,6 +109,12 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     });
   routine.command("list").option("--json").addOption(requestTimeoutOption())
     .action(remote("routine-list", (data) => table(data as Array<Record<string, unknown>>, ["id", "schedule", "policy", "target", "lastDecision"]), () => ({})));
+  routine.command("occurrences").option("--principal <principal>").option("--stack <stack>").requiredOption("--start <instant>").requiredOption("--end <instant>").requiredOption("--timezone <iana>").option("--limit <count>", "Page size, at most 1000", "200").option("--cursor <cursor>").option("--json").addOption(requestTimeoutOption())
+    .action(remote("routine-occurrences", (data) => JSON.stringify(data), ({ opts }) => {
+      const cfg = io.cfg ?? loadConfig();
+      const query = opts as Record<string, unknown>;
+      return { principal: query.principal ?? cfg.principal, stack: query.stack ?? cfg.stack, start: query.start, end: query.end, timezone: query.timezone, limit: Number(query.limit), ...(query.cursor ? { cursor: query.cursor } : {}) };
+    }));
   routine.command("inspect <id>").option("--json").addOption(requestTimeoutOption())
     .action(async (id: string, opts: Record<string, unknown>, cmd: unknown) => {
       await remote("routine-inspect", (data) => JSON.stringify(data), () => ({ id }))(id, opts, cmd);
