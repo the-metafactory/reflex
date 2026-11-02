@@ -79,6 +79,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
     .requiredOption("--payload <json>")
     .option("--policy <policy>", "approve or auto", "approve")
     .option("--serves-goal <goal>")
+    .option("--paused", "Install the routine paused; resume it through routine lifecycle")
     .option("--flow-file <path>", "Install a supplied YAML flow into Reflex-owned storage")
     .option("--json")
     .addOption(requestTimeoutOption())
@@ -97,7 +98,7 @@ export async function runCommand(argv: string[], io: CliIo = {}): Promise<Render
       }
       await remote("routine-add", (data) => JSON.stringify(data), () => ({
         id: opts.id, ...(opts.name ? { name: opts.name } : {}), schedule: opts.schedule, timezone: opts.timezone, target: opts.target,
-        payload, policy: opts.policy === "approve" ? "approval" : opts.policy, ...(flow === undefined ? {} : { flow }), ...(opts.servesGoal ? { servesGoal: opts.servesGoal } : {}),
+        payload, policy: opts.policy === "approve" ? "approval" : opts.policy, ...(flow === undefined ? {} : { flow }), ...(opts.servesGoal ? { servesGoal: opts.servesGoal } : {}), ...(opts.paused === true ? { paused: true } : {}),
       }))(opts, cmd);
     });
   routine.command("remove <id>").requiredOption("--revision <revision>").requiredOption("--request-id <requestId>").option("--json").addOption(requestTimeoutOption())

@@ -68,6 +68,28 @@ describe("canonical routine pause", () => {
     } finally { await f.close(); }
   }, 15000);
 
+  it("adds a routine paused through the CLI and resumes it only through the lifecycle", async () => {
+    const f = await fixture();
+    try {
+      const added = await f.raw(["routine", "add", "--id", "created-paused", "--schedule", "0 0 1 1 *", "--timezone", "UTC", "--target", "@test/noop", "--payload", "{}", "--paused"]);
+      expect(added.exitCode).toBe(0);
+      await until(() => Boolean(f.daemon.store.get("created-paused")));
+      expect(f.daemon.store.get("created-paused")?.paused).toBe(true);
+      expect(f.daemon.scheduleStatus().some((s) => s.blueprintId === "created-paused")).toBe(false);
+      expect(await f.run(["routine", "list"])).toMatchObject([{ id: "created-paused", paused: true, policy: "approval" }]);
+      await until(async () => (await f.inspect("created-paused")).runtimeConfirmed);
+      expect((await f.inspect("created-paused")).current).toMatchObject({ paused: true, policy: "approval" });
+      const calendar = z.object({ occurrences: z.array(z.object({ routineId: z.string(), lifecycle: z.string() })) }).parse(await f.run(["routine", "occurrences", "--principal", "test", "--stack", "pause-test", "--start", "2030-01-01T00:00:00Z", "--end", "2030-01-02T00:00:00Z", "--timezone", "UTC"]));
+      expect(calendar.occurrences.find((entry) => entry.routineId === "created-paused")?.lifecycle).toBe("paused");
+      expect(await f.daemon.pipeline.evaluate({ kind: "schedule", blueprintId: "created-paused", payload: {}, receivedAt: new Date().toISOString(), actor })).toEqual({ outcome: "ignored", reason: "paused" });
+      expect(f.daemon.repo.historyFor({ limit: 10 })).toEqual([]);
+      const resumed = await f.change("created-paused", false);
+      expect(resumed.current).toMatchObject({ paused: false, policy: "approval", schedule: "0 0 1 1 *", timezone: "UTC" });
+      await until(() => f.daemon.scheduleStatus().some((s) => s.blueprintId === "created-paused"));
+      expect(await f.run(["routine", "list"])).toMatchObject([{ id: "created-paused", paused: false }]);
+    } finally { await f.close(); }
+  }, 15000);
+
   it("keeps schedule edits paused and restores canonical pause and waiting approvals after restart", async () => {
     const f = await fixture(); let restarted: Awaited<ReturnType<typeof startDaemon>> | undefined;
     try {

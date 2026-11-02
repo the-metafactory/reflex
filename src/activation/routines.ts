@@ -24,6 +24,7 @@ const addSchema = z.object({
   target: z.string().min(1),
   payload: z.record(z.unknown()).default({}),
   policy: policySchema.default("approval"),
+  paused: z.boolean().optional(),
   flow: z.string().min(1).max(1048576).optional(),
   servesGoal: z.string().regex(/^G[0-9]+$/).optional(),
 }).strict();
@@ -150,7 +151,7 @@ export class RoutineCommands {
     if (flow !== undefined && "flow" in input.payload) throw new Error("--flow-file supplies payload.flow; do not also set payload.flow");
     const text = marker + (flow === undefined ? "" : flowOwnership) + stringify({ schema: ACTIVATION_SCHEMA_ID, activations: [{
       id: input.id, ...(input.name ? { name: input.name } : {}), target: input.target, when: { schedule: input.schedule, timezone: input.timezone },
-      policy: input.policy, payload: flow === undefined ? input.payload : { ...input.payload, flow: flowFile },
+      policy: input.policy, ...(input.paused ? { paused: true } : {}), payload: flow === undefined ? input.payload : { ...input.payload, flow: flowFile },
       ...(input.servesGoal ? { serves: { goal: input.servesGoal } } : {}),
     }] });
     await this.validate(text, file, actor);
