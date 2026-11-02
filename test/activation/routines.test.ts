@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parse } from "yaml";
 import { createTransport } from "@the-metafactory/myelin";
 import { describe, it, expect } from "bun:test";
 import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, unlink, symlink, chmod, rename, lstat } from "node:fs/promises";
@@ -270,9 +271,30 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
     } finally { await f.cleanup(); }
   });
 
+  it("installs a routine paused so it never fires, and an omitted paused writes exactly what it did before", async () => {
+    const f = await fixture();
+    try {
+      expect(await f.routines.execute("routine-add", { ...input, paused: true }, actor)).toMatchObject({ ok: true, data: { id: input.id } });
+      const text = await readFile(join(f.routinesDir, `${input.id}.yaml`), "utf8");
+      expect(parse(text).activations[0]).toMatchObject({ id: input.id, policy: "approval", paused: true });
+      await until(() => f.store.get(input.id) !== undefined);
+      expect(f.store.get(input.id)?.paused).toBe(true);
+      f.schedule.sync();
+      expect(f.schedule.status().some((job) => job.blueprintId === input.id)).toBe(false);
+      expect(await f.pipeline.evaluate({ kind: "schedule", blueprintId: input.id, payload: {}, receivedAt: new Date().toISOString(), actor })).toEqual({ outcome: "ignored", reason: "paused" });
+      expect(await f.routines.execute("routine-list", {}, actor)).toMatchObject({ ok: true, data: [{ id: input.id, paused: true, policy: "approval" }] });
+      expect(f.repo.historyFor({ limit: 10 })).toEqual([]);
+      expect((await f.routines.execute("routine-add", { ...input, id: "plain-routine" }, actor)).ok).toBe(true);
+      const unpaused = await readFile(join(f.routinesDir, "plain-routine.yaml"), "utf8");
+      expect(unpaused).not.toContain("paused:");
+      expect(unpaused).toBe(text.replace("\n    paused: true", "").replaceAll(input.id, "plain-routine"));
+    } finally { await f.cleanup(); }
+  });
+
   it.each([
     { schedule: "invalid expression" }, { timezone: "Invalid/Zone" }, { target: "@jc/unknown" },
     { id: "../../escape" }, { payload: [] }, { policy: "disabled" }, { servesGoal: "bad" },
+    { paused: "yes" }, { paused: true, target: "@jc/unknown" },
   ])("refuses invalid input without writing %j", async (invalid) => {
     const f = await fixture();
     try {
@@ -288,6 +310,7 @@ describe("Reflex-owned routines with real loader and Dry Run", () => {
       expect(first.ok).toBe(true);
       const before = await readFile(join(f.routinesDir, `${input.id}.yaml`), "utf8");
       expect((await f.routines.execute("routine-add", input, actor)).ok).toBe(false);
+      expect((await f.routines.execute("routine-add", { ...input, paused: true }, actor)).ok).toBe(false);
       expect(await readFile(join(f.routinesDir, `${input.id}.yaml`), "utf8")).toBe(before);
       const results = await Promise.all([1, 2].map(() => f.routines.execute("routine-add", { ...input, id: "concurrent" }, actor)));
       expect(results.filter((r) => r.ok)).toHaveLength(1);
