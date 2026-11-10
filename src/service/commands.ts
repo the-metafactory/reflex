@@ -9,7 +9,14 @@ export interface Invocation {
   argv: string[];
   /** Non-zero exit tolerated (idempotency steps like bootout-before-bootstrap). */
   allowFail?: boolean;
+  /** Re-run a failing step until it succeeds, for at most this many ms.
+   * `launchctl bootout` returns before launchd has always let go of the job,
+   * and a bootstrap in that window fails with "Bootstrap failed: 5". */
+  retryForMs?: number;
 }
+
+/** How long an install retries its bootstrap after the bootout before it. */
+export const BOOTSTRAP_RETRY_MS = 30_000;
 
 export function assertSupported(platform: string): ServicePlatform {
   if (platform === "darwin" || platform === "linux") return platform;
@@ -30,7 +37,7 @@ export function installSequence(ctx: CommandContext): Invocation[] {
     return [
       // bootout first: makes reinstall idempotent ("already loaded" otherwise)
       { argv: ["launchctl", "bootout", `gui/${ctx.uid}/${ctx.label}`], allowFail: true },
-      { argv: ["launchctl", "bootstrap", `gui/${ctx.uid}`, ctx.unitPath] },
+      { argv: ["launchctl", "bootstrap", `gui/${ctx.uid}`, ctx.unitPath], retryForMs: BOOTSTRAP_RETRY_MS },
       { argv: ["launchctl", "kickstart", "-k", `gui/${ctx.uid}/${ctx.label}`] },
     ];
   }

@@ -21,10 +21,10 @@ describe("platform gate (scenario 5)", () => {
 });
 
 describe("darwin sequences", () => {
-  it("install: bootout(allowFail) -> bootstrap -> kickstart (scenario 3 idempotency)", () => {
+  it("install: bootout(allowFail) -> bootstrap, retried while launchd lets go -> kickstart (scenario 3 idempotency)", () => {
     expect(installSequence(darwin)).toEqual([
       { argv: ["launchctl", "bootout", "gui/501/ai.meta-factory.reflex"], allowFail: true },
-      { argv: ["launchctl", "bootstrap", "gui/501", "/u/p.plist"] },
+      { argv: ["launchctl", "bootstrap", "gui/501", "/u/p.plist"], retryForMs: 30_000 },
       { argv: ["launchctl", "kickstart", "-k", "gui/501/ai.meta-factory.reflex"] },
     ]);
   });
