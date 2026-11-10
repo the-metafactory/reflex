@@ -150,15 +150,28 @@ export function recordedBunPath(unitText: string): string | undefined {
   return match?.[1] ?? match?.[2]?.replaceAll('\\"', '"').replaceAll("\\\\", "\\");
 }
 
-async function execute(invocations: Invocation[]): Promise<ServiceResult | null> {
+async function run(argv: string[]): Promise<{ exitCode: number; stderr: string }> {
+  const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" });
+  const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+  return { exitCode, stderr };
+}
+
+/** Run a service sequence in order; the first step that fails for good ends
+ * it. A step with `retryForMs` is re-run every `retryIntervalMs` until it
+ * succeeds or its time is up. */
+export async function execute(invocations: Invocation[], retryIntervalMs = 500): Promise<ServiceResult | null> {
   for (const invocation of invocations) {
-    const proc = Bun.spawn(invocation.argv, { stdout: "pipe", stderr: "pipe" });
-    const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-    if (exitCode !== 0 && !invocation.allowFail) {
+    const deadline = Date.now() + (invocation.retryForMs ?? 0);
+    let outcome = await run(invocation.argv);
+    while (outcome.exitCode !== 0 && Date.now() < deadline) {
+      await Bun.sleep(retryIntervalMs);
+      outcome = await run(invocation.argv);
+    }
+    if (outcome.exitCode !== 0 && !invocation.allowFail) {
       return {
-        exitCode,
+        exitCode: outcome.exitCode,
         stdout: "",
-        stderr: `${stderr.trim()}\nservice step failed (${invocation.argv[0]} exited ${exitCode})`,
+        stderr: `${outcome.stderr.trim()}\nservice step failed (${invocation.argv[0]} exited ${outcome.exitCode})`,
       };
     }
   }
