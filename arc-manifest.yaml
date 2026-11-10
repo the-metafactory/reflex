@@ -1,0 +1,40 @@
+schema: arc/v1
+name: reflex
+type: tool
+tier: community
+version: 0.1.0
+description: Reflex — the activation runtime of the metafactory ecosystem. Daemon plus CLI; run the daemon from this install with `reflex service install`.
+author:
+  name: Jens-Christian Fischer
+  github: jcfischer
+license: MIT
+depends_on:
+  tools:
+    - bun
+provides:
+  cli:
+    - name: reflex
+      command: bun src/bin/reflex.ts
+      description: Reflex CLI — status, history, routines, and service management over the bus
+    - name: reflex-daemon
+      command: bun src/bin/reflex-daemon.ts
+      description: Reflex daemon — evaluates activations and fires routines
+scripts:
+  postinstall: bun install --frozen-lockfile
+capabilities:
+  filesystem:
+    read:
+      - "~/.config/reflex"            # config, activations and routines (src/config/load.ts)
+    write:
+      - "~/.config/reflex"            # routine files and service logs (src/service/run.ts)
+      - "~/.local/state"              # reflex.db under state_dir, default ~/.local/state/reflex (src/config/load.ts)
+      - "~/Library/LaunchAgents"      # `reflex service install` plist (src/service/units.ts)
+      - "~/.config/systemd/user"      # `reflex service install` unit on Linux (src/service/units.ts)
+  network:
+    - host: "localhost"
+      reason: NATS bus for activations and CLI requests (src/bus/nats-transport.ts); loopback HTTP sources (src/sources/http.ts)
+  secrets: []
+  bash:
+    allowed: true
+    # Routine target discovery runs the operator's configured command
+    # (src/activation/target-command.ts); `reflex service` runs launchctl or systemctl.
