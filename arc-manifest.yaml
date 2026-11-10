@@ -19,12 +19,11 @@ provides:
     - name: reflex-daemon
       command: bun src/bin/reflex-daemon.ts
       description: Reflex daemon — evaluates activations and fires routines
-scripts:
-  postinstall: bun install --frozen-lockfile
 capabilities:
   filesystem:
     read:
       - "~/.config/reflex"            # config, activations and routines (src/config/load.ts)
+      - "~/.config/nats/creds/reflex.creds"   # default NATS credential (src/config/schema.ts)
     write:
       - "~/.config/reflex"            # routine files and service logs (src/service/run.ts)
       - "~/.local/state"              # reflex.db under state_dir, default ~/.local/state/reflex (src/config/load.ts)

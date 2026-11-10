@@ -66,10 +66,11 @@ Arc clones reflex into its install directory, runs `bun install`, and puts `refl
 
 ```sh
 arc upgrade reflex --force
+reflex service stop --instance personal
 reflex service start --instance personal
 ```
 
-`--force` is needed because a plain `arc upgrade` skips a package whose version has not changed. `service start` restarts a running daemon (`launchctl kickstart -k`).
+`--force` is needed because a plain `arc upgrade` skips a package whose version has not changed. `stop` then `start` restarts the daemon on the new code on both macOS and Linux; on Linux, `start` alone leaves a running daemon on the old code.
 
 ### Running the second instance as a service
 
