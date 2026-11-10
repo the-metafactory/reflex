@@ -1,4 +1,4 @@
-import { dirname } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 
 /** XML-escape a plist string value (paths may legally contain & < > ' "). */
 function xml(value: string): string {
@@ -13,6 +13,12 @@ function xml(value: string): string {
 /** systemd-quote one ExecStart argument (double quotes + backslash escapes). */
 function sdQuote(value: string): string {
   return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+/** One systemd `Environment=` line. systemd expands `%` specifiers in the
+ * value (systemd.exec(5)), so a literal `%` is written as `%%`. */
+function sdEnv(name: string, value: string): string {
+  return `Environment=${sdQuote(`${name}=${value.replaceAll("%", "%%")}`)}`;
 }
 
 /**
@@ -40,6 +46,29 @@ export interface UnitContext {
   /** Absolute config path → `REFLEX_CONFIG` in the unit env (named
    * instances, reflex#37). Unset: no entry, the default render. */
   reflexConfig?: string;
+  /** The unit's `PATH` (see {@link servicePath}). Unset: bun's directory plus
+   * {@link FIXED_PATH}, the render before the installer's PATH was kept. */
+  path?: string;
+}
+
+/** System directories every unit `PATH` ends with. */
+export const FIXED_PATH = ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"] as const;
+
+/**
+ * The `PATH` a unit runs with: bun's directory, then the absolute entries of
+ * the installer's `PATH` in order, then {@link FIXED_PATH}; first occurrence
+ * wins. Keeping the installer's entries lets routines and target commands
+ * find the same tools by name that `reflex` found when it was installed.
+ * Relative and empty entries are dropped: under launchd or systemd they would
+ * resolve against the daemon's working directory.
+ */
+export function servicePath(bunPath: string, installerPath: string | undefined): string {
+  const entries = [dirname(bunPath), ...(installerPath ?? "").split(":").filter((entry) => isAbsolute(entry)), ...FIXED_PATH];
+  return [...new Set(entries)].join(":");
+}
+
+function unitPath(ctx: UnitContext): string {
+  return ctx.path ?? [dirname(ctx.bunPath), ...FIXED_PATH].join(":");
 }
 
 export const SERVICE_LABEL = "ai.meta-factory.reflex";
@@ -77,7 +106,7 @@ export function renderLaunchdPlist(ctx: UnitContext): string {
         <key>HOME</key>
         <string>${xml(ctx.home)}</string>
         <key>PATH</key>
-        <string>${xml(dirname(ctx.bunPath))}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>${
+        <string>${xml(unitPath(ctx))}</string>${
           ctx.reflexConfig === undefined
             ? ""
             : `
@@ -103,8 +132,8 @@ ExecStart=${sdQuote(ctx.bunPath)} ${sdQuote(ctx.daemonScript)}
 WorkingDirectory=${sdQuote(ctx.workingDir)}
 Restart=always
 RestartSec=2
-Environment=${sdQuote(`HOME=${ctx.home}`)}
-${ctx.reflexConfig === undefined ? "" : `Environment=${sdQuote(`REFLEX_CONFIG=${ctx.reflexConfig}`)}\n`}
+${sdEnv("HOME", ctx.home)}
+${ctx.path === undefined ? "" : `${sdEnv("PATH", ctx.path)}\n`}${ctx.reflexConfig === undefined ? "" : `${sdEnv("REFLEX_CONFIG", ctx.reflexConfig)}\n`}
 [Install]
 WantedBy=default.target
 `;

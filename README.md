@@ -62,7 +62,7 @@ arc install https://github.com/the-metafactory/reflex
 reflex service install --instance personal --config ~/.config/reflex/personal.yaml
 ```
 
-Arc clones reflex into its install directory, runs `bun install`, and puts `reflex` and `reflex-daemon` shims on its bin path. `reflex service install` writes the unit with the daemon path of the `reflex` it runs from, so run it through the arc shim: the service then runs the install, not a development checkout. To deploy a merged change:
+Arc clones reflex into its install directory, runs `bun install`, and puts `reflex` and `reflex-daemon` shims on its bin path. `reflex service install` writes the unit with the daemon path of the `reflex` it runs from, so run it through the arc shim: the service then runs the install, not a development checkout. The unit also keeps the absolute entries of your `PATH` at install time, after bun's directory and before `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`, so routines find the same tools by name that your shell does. Re-run the install after changing which directories they need. To deploy a merged change:
 
 ```sh
 arc upgrade reflex --force

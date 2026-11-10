@@ -14,7 +14,7 @@ import {
   type Invocation,
 } from "./commands";
 import { loadConfig } from "../config/load";
-import { renderLaunchdPlist, renderSystemdUnit, SERVICE_LABEL, type UnitContext } from "./units";
+import { renderLaunchdPlist, renderSystemdUnit, SERVICE_LABEL, servicePath, type UnitContext } from "./units";
 
 export interface ServiceResult {
   exitCode: number;
@@ -49,6 +49,8 @@ export interface ServiceHost {
   home: string;
   uid: number;
   cwd: string;
+  /** The installer's `PATH`, kept in the rendered unit (see servicePath). */
+  path?: string;
 }
 
 const realHost = (): ServiceHost => ({
@@ -56,6 +58,7 @@ const realHost = (): ServiceHost => ({
   home: homedir(),
   uid: userInfo().uid,
   cwd: process.cwd(),
+  ...(process.env.PATH !== undefined ? { path: process.env.PATH } : {}),
 });
 
 /** Per-service names: the default service, or the `<instance>`-suffixed set. */
@@ -124,6 +127,7 @@ export function buildServiceContext(verb: string, options: ServiceOptions = {}, 
     home: host.home,
     logsDir,
     ...(reflexConfig !== undefined ? { reflexConfig } : {}),
+    path: servicePath(process.execPath, host.path),
   };
   const unitPath =
     platform === "darwin"
