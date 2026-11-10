@@ -50,3 +50,12 @@ describe("reflex service install keeps the installer's PATH", () => {
     expect(unit.path?.startsWith(`${dirname(process.execPath)}:/home/op/.local/bin:/home/op/bin:`)).toBe(true);
   });
 });
+
+describe("systemd Environment values", () => {
+  it("write a literal % as %% so systemd does not expand it as a specifier", () => {
+    const unit = renderSystemdUnit({ ...ctx, home: "/home/50%", path: "/opt/tools%h/bin:/usr/bin", reflexConfig: "/cfg/%i.yaml" });
+    expect(unit).toContain('Environment="HOME=/home/50%%"\n');
+    expect(unit).toContain('Environment="PATH=/opt/tools%%h/bin:/usr/bin"\n');
+    expect(unit).toContain('Environment="REFLEX_CONFIG=/cfg/%%i.yaml"\n');
+  });
+});

@@ -15,6 +15,12 @@ function sdQuote(value: string): string {
   return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
+/** One systemd `Environment=` line. systemd expands `%` specifiers in the
+ * value (systemd.exec(5)), so a literal `%` is written as `%%`. */
+function sdEnv(name: string, value: string): string {
+  return `Environment=${sdQuote(`${name}=${value.replaceAll("%", "%%")}`)}`;
+}
+
 /**
  * Unit fields are persisted into supervisor definitions — newlines or other
  * control characters would inject directives (sage R-111 security finding).
@@ -126,8 +132,8 @@ ExecStart=${sdQuote(ctx.bunPath)} ${sdQuote(ctx.daemonScript)}
 WorkingDirectory=${sdQuote(ctx.workingDir)}
 Restart=always
 RestartSec=2
-Environment=${sdQuote(`HOME=${ctx.home}`)}
-${ctx.path === undefined ? "" : `Environment=${sdQuote(`PATH=${ctx.path}`)}\n`}${ctx.reflexConfig === undefined ? "" : `Environment=${sdQuote(`REFLEX_CONFIG=${ctx.reflexConfig}`)}\n`}
+${sdEnv("HOME", ctx.home)}
+${ctx.path === undefined ? "" : `${sdEnv("PATH", ctx.path)}\n`}${ctx.reflexConfig === undefined ? "" : `${sdEnv("REFLEX_CONFIG", ctx.reflexConfig)}\n`}
 [Install]
 WantedBy=default.target
 `;
