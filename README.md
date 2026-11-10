@@ -55,6 +55,23 @@ REFLEX_CONFIG=~/.config/reflex/personal.yaml reflex status        # CLI against 
 
 The CLI never opens the DB; it reaches its daemon over the bus, addressed by the config's `principal` and `stack`.
 
+### Install with arc
+
+```sh
+arc install https://github.com/the-metafactory/reflex
+reflex service install --instance personal --config ~/.config/reflex/personal.yaml
+```
+
+Arc clones reflex into its install directory, runs `bun install`, and puts `reflex` and `reflex-daemon` shims on its bin path. `reflex service install` writes the unit with the daemon path of the `reflex` it runs from, so run it through the arc shim: the service then runs the install, not a development checkout. To deploy a merged change:
+
+```sh
+arc upgrade reflex --force
+reflex service stop --instance personal
+reflex service start --instance personal
+```
+
+`--force` is needed because a plain `arc upgrade` skips a package whose version has not changed. `stop` then `start` restarts the daemon on the new code on both macOS and Linux; on Linux, `start` alone leaves a running daemon on the old code.
+
 ### Running the second instance as a service
 
 `reflex service` manages the default service. Add `--instance <name>` to manage a named one next to it:
