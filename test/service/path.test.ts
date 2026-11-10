@@ -23,6 +23,12 @@ describe("servicePath", () => {
       "/opt/bun/bin:/home/op/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin",
     );
   });
+  it("drops the node_modules/.bin entries bun run adds, keeping a directory that only contains .bin", () => {
+    const installer = "/opt/reflex/node_modules/.bin:/opt/node_modules/.bin/:/node_modules/.bin:/home/op/.local/bin:/home/op/tools/.bin";
+    expect(servicePath("/opt/bun/bin/bun", installer)).toBe(
+      "/opt/bun/bin:/home/op/.local/bin:/home/op/tools/.bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin",
+    );
+  });
   it("without an installer PATH is bun plus the system directories", () => {
     expect(servicePath("/opt/bun/bin/bun", undefined)).toBe("/opt/bun/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin");
   });

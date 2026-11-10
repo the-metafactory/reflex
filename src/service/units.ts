@@ -1,4 +1,4 @@
-import { dirname, isAbsolute } from "node:path";
+import { basename, dirname, isAbsolute } from "node:path";
 
 /** XML-escape a plist string value (paths may legally contain & < > ' "). */
 function xml(value: string): string {
@@ -60,11 +60,19 @@ export const FIXED_PATH = ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/
  * wins. Keeping the installer's entries lets routines and target commands
  * find the same tools by name that `reflex` found when it was installed.
  * Relative and empty entries are dropped: under launchd or systemd they would
- * resolve against the daemon's working directory.
+ * resolve against the daemon's working directory. `node_modules/.bin` entries
+ * are dropped too: `bun run`, which the arc shim uses, adds one for the
+ * package and for every parent directory, and they would put dependency tools
+ * ahead of the operator's own.
  */
 export function servicePath(bunPath: string, installerPath: string | undefined): string {
-  const entries = [dirname(bunPath), ...(installerPath ?? "").split(":").filter((entry) => isAbsolute(entry)), ...FIXED_PATH];
+  const kept = (installerPath ?? "").split(":").filter((entry) => isAbsolute(entry) && !isNodeModulesBin(entry));
+  const entries = [dirname(bunPath), ...kept, ...FIXED_PATH];
   return [...new Set(entries)].join(":");
+}
+
+function isNodeModulesBin(entry: string): boolean {
+  return basename(entry) === ".bin" && basename(dirname(entry)) === "node_modules";
 }
 
 function unitPath(ctx: UnitContext): string {
